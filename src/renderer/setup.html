@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'">
+<title>Claude Code 연결</title>
+<style>
+  :root { --bg: #17181c; --row: #212328; --line: #2e3138; --text: #e8e9ec; --muted: #8b9099;
+    --title: #f783ac; --ok: #51cf66; --warn: #ff922b; --bad: #fa5252; }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font: 13px/1.5 "Pretendard", "Malgun Gothic", system-ui, sans-serif; }
+  main { padding: 20px 22px; display: flex; flex-direction: column; gap: 14px; }
+  h1 { margin: 0; font-size: 17px; color: var(--title); }
+  p { margin: 0; color: var(--muted); }
+  .card { background: var(--row); border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+  .st { display: flex; justify-content: space-between; gap: 10px; }
+  .st b { font-weight: 600; }
+  .on { color: var(--ok); } .off { color: var(--muted); } .warn { color: var(--warn); }
+  label { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; }
+  label small { display: block; color: var(--muted); font-size: 12px; }
+  input[type=checkbox] { margin-top: 3px; accent-color: var(--title); }
+  .btns { display: flex; gap: 8px; }
+  button { font: inherit; border-radius: 6px; padding: 7px 14px; cursor: pointer; border: 1px solid var(--line);
+    background: none; color: var(--text); }
+  button.primary { background: var(--title); border-color: var(--title); color: #17181c; font-weight: 700; }
+  button:disabled { opacity: .5; cursor: default; }
+  button.ghost { margin-left: auto; color: var(--muted); }
+  #msg { min-height: 1.5em; font-size: 12px; white-space: pre-wrap; }
+  #msg.ok { color: var(--ok); } #msg.bad { color: var(--bad); }
+  footer { color: var(--muted); font-size: 11px; border-top: 1px solid var(--line); padding-top: 10px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Claude Code 연결</h1>
+  <p>Claude Code 가 세션 상태와 사용량을 이 앱에 알려 주도록 <code>~/.claude/settings.json</code> 에 항목을 추가해요.
+    원래 설정은 바꾸기 전에 백업하고, 언제든 「연결 해제」로 되돌릴 수 있어요.</p>
+
+  <div class="card">
+    <div class="st"><span>세션 기록 훅</span><b id="sHooks">…</b></div>
+    <div class="st"><span>사용량 상태줄</span><b id="sStatus">…</b></div>
+    <div class="st" id="rowLegacy" hidden><span>이전 버전(session-dash) 훅</span><b class="warn">발견 — 연결하면 교체돼요</b></div>
+  </div>
+
+  <div class="card">
+    <label><input type="checkbox" id="cHooks" checked>
+      <span>세션 기록<small>Claude Code 가 작업 상태를 내 사용자 폴더에 작은 파일로 남기고, 이 앱이 읽은 뒤 바로 지워요. 외부로 나가는 데이터는 없어요.</small></span></label>
+    <label><input type="checkbox" id="cStatus" checked>
+      <span>사용량 상태줄<small id="statusHint">터미널 아래 상태줄에 5시간·주간 사용량을 보여 주고, 위젯에도 저장해요.</small></span></label>
+    <label id="rowEditors"><input type="checkbox" id="cEditors" checked>
+      <span>Cursor·VS Code 터미널 탭 찾기<small id="editorsHint">「➜」를 누르면 에디터 안의 정확한 터미널 탭으로 이동하게 작은 확장을 설치해요.</small></span></label>
+    <label><input type="checkbox" id="cLogin" checked>
+      <span>Windows 시작 시 실행<small>트레이에 조용히 떠 있어야 기록이 빠지지 않아요.</small></span></label>
+  </div>
+
+  <div class="btns">
+    <button class="primary" id="bConnect">연결하기</button>
+    <button id="bDisconnect">연결 해제</button>
+    <button class="ghost" id="bWidget" disabled title="연결한 다음에 열 수 있어요">위젯 열기</button>
+  </div>
+  <div id="msg"></div>
+
+  <footer>Claude Buddy <span id="ver"></span> · Unofficial fan-made tool, not affiliated with Anthropic.</footer>
+</main>
+<script src="/setup.js"></script>
+</body>
+</html>

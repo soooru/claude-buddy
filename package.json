@@ -1,0 +1,86 @@
+{
+  "name": "claude-buddy",
+  "productName": "Claude Buddy",
+  "version": "0.7.1",
+  "description": "Unofficial desktop buddy for Claude Code — session dashboard, usage meter and a tiny pixel pet.",
+  "author": "soooru",
+  "license": "MIT",
+  "private": true,
+  "main": "src/main/main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "icons": "node tools/make-icon.cjs",
+    "sheet": "node tools/pet-sheet.cjs",
+    "check": "node tools/check.cjs",
+    "security-test": "node tools/security-test.cjs",
+    "vsix": "node tools/build-vsix.cjs",
+    "dist": "node tools/build-vsix.cjs && electron-builder --win nsis --publish never"
+  },
+  "devDependencies": {
+    "electron": "44.9.3",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "io.github.soooru.claude-buddy",
+    "productName": "Claude Buddy",
+    "copyright": "Unofficial fan-made tool, not affiliated with Anthropic",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "package.json",
+      "!**/*.map"
+    ],
+    "extraResources": [
+      {
+        "from": "resources",
+        "to": "bin",
+        "filter": [
+          "*.ps1",
+          "*.vsix"
+        ]
+      }
+    ],
+    "asar": true,
+    "electronFuses": {
+      "runAsNode": false,
+      "enableCookieEncryption": true,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "enableEmbeddedAsarIntegrityValidation": true,
+      "onlyLoadAppFromAsar": true
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": false,
+      "allowToChangeInstallationDirectory": true,
+      "createStartMenuShortcut": true,
+      "createDesktopShortcut": false,
+      "shortcutName": "Claude Buddy",
+      "include": "build/installer.nsh",
+      "artifactName": "Claude-Buddy-Setup-${version}.${ext}",
+      "deleteAppDataOnUninstall": true
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "soooru",
+        "repo": "claude-buddy"
+      }
+    ]
+  }
+}

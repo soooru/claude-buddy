@@ -1,0 +1,685 @@
+// 「위에 띄우기」로 다른 문서에 옮겨져도 찾을 수 있게 #app 기준으로 조회한다
+const app = document.getElementById('app');
+const $ = (id) => app.querySelector('#' + id);
+// 기록 API 는 앱이 건네준 키가 있어야 응답한다(같은 PC 의 다른 계정·브라우저는 못 읽는다)
+const BUDDY_KEY = window.dashApp ? window.dashApp.key() : null;
+const api = (url, opts = {}) => fetch(url, { ...opts, headers: { ...(opts.headers || {}), 'X-Buddy-Key': BUDDY_KEY || '' } });
+// 부르는 세션으로 이동(🔔·데스크톱 펫 말풍선) — 가장 먼저 부른 세션부터
+async function goWaiting() {
+  const s = data && data.sessions.find((x) => x.state === 'waiting' && x.pid);
+  if (!s) return;
+  try { await api(`/api/focus/${encodeURIComponent(s.sessionId)}`, { method: 'POST' }); } catch {}
+}
+// 미니 모드(데스크톱 펫) — 같은 페이지를 ?mini=1 로 띄워 펫과 말풍선만 보인다
+const MINI = new URLSearchParams(location.search).get('mini') === '1' && !!window.dashApp;
+if (MINI) document.body.classList.add('mini');
+
+// 상태마다 여러 캐릭터 — 세션별로 하나가 고정되고, 프레임을 돌려 움직인다
+const FACES = {
+  working: [
+    ['(•̀ᴗ•́)و', '(•̀ᴗ•́)ง'],
+    ['ᕦ(ò_óˇ)ᕤ', 'ᕙ(ò_óˇ)ᕗ'],
+    ['(ﾉ>ω<)ﾉ', 'ヽ(>ω<ヽ)'],
+    ['( ˘▽˘)っ♨', '( ˘▽˘)っ♨~'],
+  ],
+  waiting: [
+    ['(・_・ヾ', '(・_・;)'],
+    ['( ・ω・)ノ', '( ・ω・)ノ!'],
+  ],
+  done: [
+    ['(๑˃ᴗ˂)ﻭ', '(๑˃ᴗ˂)ﻭ✧'],
+    ['ヽ(•‿•)ノ', 'ヽ(•‿•)ノ♪'],
+  ],
+  idle: [
+    ['(－.－)…z', '(－.－)…zz', '(－.－)…zzz'],
+    ['(ᴗ˳ᴗ)…z', '(ᴗ˳ᴗ)…zz', '(ᴗ˳ᴗ)…zzz'],
+  ],
+};
+const SAY = { working: '열일 중', waiting: '불러줘요!', done: '다 했어요', idle: '꿀잠 중' };
+const WAIT = { permission_prompt: '이거 해도 돼요? 허락해줘요!', idle_prompt: '다음 할 일 알려줘요!', elicitation_dialog: '질문에 답해줘요!' };
+const ORDER = { waiting: 0, working: 1, done: 2, idle: 3 };
+// 쉬는 쪽은 느리게 숨 쉬듯, 일하는 쪽은 빠르게
+const SPEED = { working: 1, waiting: 1, done: 2, idle: 3 };
+
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const hash = (s) => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
+let tick = 0;
+function frame(id, st) {
+  const set = FACES[st][hash(id) % FACES[st].length];
+  return set[Math.floor(tick / SPEED[st]) % set.length];
+}
+function ago(iso) {
+  if (!iso) return '';
+  const sec = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
+  if (sec < 60) return `${Math.floor(sec)}초 전`;
+  if (sec < 3600) return `${Math.floor(sec / 60)}분 전`;
+  if (sec < 86400) return `${Math.floor(sec / 3600)}시간 전`;
+  return `${Math.floor(sec / 86400)}일 전`;
+}
+
+function duration(ms) {
+  const sec = Math.max(0, Math.floor(ms / 1000));
+  if (sec < 60) return `${sec}초`;
+  const m = Math.floor(sec / 60);
+  if (m < 60) return `${m}분 ${sec % 60}초`;
+  return `${Math.floor(m / 60)}시간 ${m % 60}분`;
+}
+const tokens = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(n));
+// cwd 아래 파일은 상대경로로
+function rel(cwd, f) {
+  if (cwd && f.toLowerCase().startsWith(cwd.toLowerCase() + '\\')) return f.slice(cwd.length + 1);
+  return f;
+}
+
+// 일하는 중이면 지금까지, 다 했으면 걸린 시간, 그 외엔 마지막 활동 시각
+function workTime(s, st) {
+  if ((st === 'working' || st === 'waiting') && s.turnStartedAt) return duration(Date.now() - Date.parse(s.turnStartedAt));
+  if (st === 'done' && s.lastTurnMs != null) return `${duration(s.lastTurnMs)} 걸림`;
+  return ago(s.updatedAt || s.startedAt);
+}
+
+const expanded = new Set(); // 펼친 행 — 다시 그려도 유지
+const rowMsgs = new Map(); // 이동 결과 안내 { id: { text, ok, until } }
+
+function detail(s) {
+  const parts = [];
+  if (s.lastSummaryFull || s.lastSummary) parts.push(`<div><h4>마지막 응답</h4><div class="full">${esc(s.lastSummaryFull || s.lastSummary)}</div></div>`);
+  if (s.recentPrompts && s.recentPrompts.length) parts.push(`<div><h4>최근 요청</h4><ol>${s.recentPrompts.map((p) => `<li>${esc(p)}</li>`).join('')}</ol></div>`);
+  const files = s.turnFiles && s.turnFiles.length ? s.turnFiles : null;
+  if (files) parts.push(`<div><h4>이번 요청에서 수정한 파일</h4><ul>${files.map((f) => `<li title="${esc(f)}">${esc(rel(s.cwd, f))}</li>`).join('')}</ul></div>`);
+  const stats = [
+    s.contextTokens && `컨텍스트 ${tokens(s.contextTokens)}`,
+    s.outputTokens && `출력 누적 ${tokens(s.outputTokens)}`,
+    s.files && s.files.length && `세션 전체 수정 파일 ${s.files.length}개`,
+    s.cwd,
+  ].filter(Boolean);
+  if (stats.length) parts.push(`<div class="stats">${esc(stats.join(' · '))}</div>`);
+  return `<div class="detail">${parts.join('') || '<div class="stats">아직 기록이 없어요 — 다음 요청부터 쌓여요</div>'}</div>`;
+}
+
+function row(s) {
+  const st = ORDER[s.state] !== undefined ? s.state : 'idle';
+  const name = s.alias || s.name || s.title || s.project || s.sessionId.slice(0, 8);
+  const fileCount = s.turnFiles && s.turnFiles.length;
+  const meta = [s.project, s.branch && `⎇ ${s.branch}`, fileCount && `파일 ${fileCount}개`, s.contextTokens && `컨텍스트 ${tokens(s.contextTokens)}`]
+    .filter(Boolean).join(' · ');
+  const canGo = s.pid && s.kind === 'interactive';
+  let extra = '';
+  if (st === 'waiting') extra = `<div class="line"><span class="q alert">!</span><span class="t alert">${esc(WAIT[s.waitType] || s.message || SAY.waiting)}</span></div>`;
+  else if (st === 'working' && s.tool) extra = `<div class="line tool"><span class="q"><span class="spin"></span></span><span class="t">${esc(s.tool)}</span></div>`;
+  const msg = rowMsgs.get(s.sessionId);
+  const msgHtml = msg && msg.until > Date.now() ? `<div class="row-msg ${msg.ok ? 'ok' : ''}">${esc(msg.text)}</div>` : '';
+  return `<div class="row ${st}" data-id="${esc(s.sessionId)}" data-st="${st}" style="--c: var(--${st})">
+    <div class="main">
+      <div class="head"><span class="face">${esc(frame(s.sessionId, st))}</span><span class="name">${esc(name)}</span>
+        <button class="edit" data-name="${esc(s.alias || '')}" title="이름 붙이기">✎</button></div>
+      ${meta ? `<div class="meta" title="${esc(s.cwd)}">${esc(meta)}</div>` : ''}
+      ${s.lastPrompt ? `<div class="line prompt" title="눌러서 마지막 응답 · 최근 요청 보기"><span class="q">“</span><span class="t">${esc(s.lastPrompt)}</span><span class="fold">${expanded.has(s.sessionId) ? '▴' : '▾'}</span></div>` : ''}
+    </div>
+    <div class="side">
+      <span class="say">${SAY[st]}</span>
+      <span class="time">${esc(workTime(s, st))}</span>
+      ${canGo ? `<button class="go" title="ε=┌(˙▿˙)┘ 이 세션으로 이동">➜</button>` : ''}
+    </div>
+    ${extra}
+    ${msgHtml}
+    ${expanded.has(s.sessionId) ? detail(s) : ''}
+  </div>`;
+}
+
+let editing = false; // 이름 입력 중에는 목록을 다시 그리지 않는다(입력칸이 날아가므로)
+// 펼친 내용을 드래그로 고르는 중에도 다시 그리지 않는다(선택이 풀리므로)
+const selecting = () => { const sel = (app.ownerDocument.defaultView || window).getSelection(); return sel && !sel.isCollapsed && app.contains(sel.anchorNode); };
+
+// 서버가 변경을 알릴 때만(/api/events) 데이터를 다시 받는다 — 폴링하지 않는다.
+// 경과 시간·밥 소화처럼 시간만 흐르는 표시는 받아 둔 데이터로 다시 그린다(render).
+let data = null;
+let disconnected = false;
+async function load() {
+  try {
+    const get = (u) => api(u, { cache: 'no-store' }).then((r) => r.json());
+    const [s, u, p, pr] = await Promise.all([get('/api/sessions'), get('/api/usage').catch(() => null),
+      get('/api/pet').catch(() => ({})), get('/api/prefs').catch(() => null)]);
+    data = s;
+    lastUsage = u && u.at ? u : null;
+    petData = p || {};
+    if (pr) prefs = pr;
+    disconnected = false;
+  } catch {
+    disconnected = true;
+  }
+  render();
+}
+
+function render() {
+  if (editing || selecting()) return;
+  const err = $('err');
+  if (disconnected || !data) {
+    err.textContent = disconnected ? '서버 연결 끊김 — 트레이의 Claude Buddy 가 켜져 있는지 확인해 주세요' : '';
+    return;
+  }
+  {
+    const { sessions: all, liveCheck } = data;
+    const sessions = all.filter((s) => s.state !== 'ended' && s.state !== 'failed');
+    sessions.sort((a, b) => (ORDER[a.state] ?? 9) - (ORDER[b.state] ?? 9) ||
+      Date.parse(b.updatedAt || b.startedAt) - Date.parse(a.updatedAt || a.startedAt));
+    const n = (...k) => sessions.filter((s) => k.includes(s.state)).length;
+    const waiting = n('waiting');
+    $('count').textContent = `작업 세션 ${sessions.length}개 · 작업 중 ${n('working')}개`;
+    petCounts = { working: n('working'), waiting };
+    renderOffWork();
+    renderUsage();
+    $('bell').hidden = !waiting; // 누가 부를 때만 나타난다
+    $('bell').classList.toggle('on', waiting > 0);
+    $('bellCount').hidden = !waiting;
+    $('bellCount').textContent = waiting > 9 ? '9+' : String(waiting);
+    $('bell').title = waiting ? `작업자 ${waiting}명이 불러요! — 눌러서 이동` : '부르는 세션 없음';
+    // 펼친 응답을 스크롤해 둔 위치를 다시 그린 뒤에도 유지
+    const scrolls = new Map([...app.querySelectorAll('.row[data-id] .full')].map((el) => [el.closest('.row').dataset.id, el.scrollTop]));
+    $('list').innerHTML =
+      sessions.map(row).join('') || `<div class="empty">${FACES.idle[0][2]} 다들 퇴근했어요</div>`;
+    for (const [id, top] of scrolls) {
+      const el = app.querySelector(`.row[data-id="${CSS.escape(id)}"] .full`);
+      if (el) el.scrollTop = top;
+    }
+    err.textContent = liveCheck === 'ok' || liveCheck === 'pending' ? '' : `생존 확인 불가: ${liveCheck}`;
+    document.title = waiting ? `(${waiting}) 불러요! — Claude Buddy` : 'Claude Buddy';
+  }
+}
+
+// ── 퇴근까지 ── PC 시간대와 상관없이 KST(Asia/Seoul) 기준
+let prefs = { showOffWork: false, offWork: '18:00' };
+const KST = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'Asia/Seoul', hour12: false, weekday: 'short', hour: '2-digit', minute: '2-digit',
+});
+function kstNow() {
+  const parts = Object.fromEntries(KST.formatToParts(new Date()).map((x) => [x.type, x.value]));
+  return { weekday: parts.weekday, minutes: (Number(parts.hour) % 24) * 60 + Number(parts.minute) };
+}
+function renderOffWork() {
+  const box = $('offwork');
+  box.hidden = !prefs.showOffWork;
+  if (box.hidden) return;
+  const [oh, om] = prefs.offWork.split(':').map(Number);
+  const now = kstNow();
+  const left = oh * 60 + om - now.minutes;
+  box.classList.toggle('done', left <= 0 || now.weekday === 'Sat' || now.weekday === 'Sun');
+  if (now.weekday === 'Sat' || now.weekday === 'Sun') box.innerHTML = '🏖 <b>오늘은 쉬는 날이에요</b>';
+  else if (left <= 0) box.innerHTML = '🎉 <b>퇴근 시간이에요! 수고하셨어요</b>';
+  else {
+    const h = Math.floor(left / 60), m = left % 60;
+    box.innerHTML = `🏠 퇴근까지 <b>${h ? `${h}시간 ` : ''}${m}분</b>`;
+  }
+  box.title = `퇴근 시간 ${prefs.offWork} (KST) — ⚙ 에서 바꿀 수 있어요`;
+}
+
+async function savePrefs(patch) {
+  try {
+    const r = await api('/api/prefs', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...prefs, ...patch }) });
+    if (r.ok) prefs = await r.json();
+  } catch {}
+  renderOffWork();
+}
+// ── ⚙ 메뉴와 설정 화면(탭) ── 메뉴에서 고른 화면이 본 화면 자리를 대신하고, ← 로 돌아온다
+const menu = $('menu');
+const closeMenu = () => { menu.hidden = true; $('gear').classList.remove('on'); };
+$('gear').onclick = (e) => {
+  e.stopPropagation();
+  menu.hidden = !menu.hidden;
+  $('gear').classList.toggle('on', !menu.hidden);
+};
+document.addEventListener('click', (e) => { if (!menu.hidden && !menu.contains(e.target)) closeMenu(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeMenu(); showView(null); } });
+
+let currentView = null;
+function showView(id) {
+  currentView = id;
+  for (const v of app.querySelectorAll('.view')) v.hidden = v.id !== id;
+  $('mainView').hidden = !!id;
+  if (id === 'viewOff') { $('prefOff').checked = !!prefs.showOffWork; $('prefOffTime').value = prefs.offWork; }
+  if (id === 'viewDex') renderDex();
+}
+for (const b of menu.querySelectorAll('[data-view]')) b.onclick = () => { closeMenu(); showView(b.dataset.view); };
+for (const b of app.querySelectorAll('[data-back]')) b.onclick = () => showView(null);
+$('prefOff').onchange = (e) => savePrefs({ showOffWork: e.target.checked });
+$('prefOffTime').onchange = (e) => { if (/^\d{2}:\d{2}$/.test(e.target.value)) savePrefs({ offWork: e.target.value }); };
+
+// 5시간·주간 한도 — 상태줄이 마지막으로 그려진 시점의 값이라 「N분 전 기준」을 함께 보인다
+function untilReset(epochSec) {
+  const sec = Math.floor(epochSec - Date.now() / 1000);
+  if (!epochSec || sec <= 0) return '';
+  const d = Math.floor(sec / 86400), h = Math.floor((sec % 86400) / 3600), m = Math.floor((sec % 3600) / 60);
+  return d ? `${d}일 ${h}시간` : h ? `${h}시간 ${m}분` : `${Math.max(1, m)}분`;
+}
+function renderUsage() {
+  const box = $('usage');
+  const u = lastUsage;
+  renderPet();
+  if (!u || !u.at || !(u.five_hour || u.seven_day)) { box.hidden = $('usageTitle').hidden = true; return; }
+  const meter = (label, r) => {
+    if (!r) return '';
+    const p = Math.max(0, Math.min(100, Math.round(r.used_percentage)));
+    const c = p >= 85 ? '#fa5252' : p >= 60 ? '#fcc419' : 'var(--working)';
+    // 리셋 시각이 지났으면 저장된 사용률은 이미 의미가 없다
+    const gone = r.resets_at && r.resets_at * 1000 <= Date.now();
+    return `<div class="u" style="--uc:${gone ? 'var(--muted)' : c}"><span class="k">${label}</span>
+      <span class="bar"><i style="width:${gone ? 0 : Math.max(p ? 2 : 0, p)}%"></i></span>
+      <span class="p">${gone ? '—' : p + '%'}</span><span class="r">${gone ? '리셋됨' : esc(untilReset(r.resets_at))}</span></div>`;
+  };
+  const over = [u.five_hour, u.seven_day].some((r) => r && r.used_percentage >= 100 && !(r.resets_at * 1000 <= Date.now()));
+  const age = Date.now() - u.at;
+  box.classList.toggle('stale', age > 30 * 60e3);
+  // 한도를 넘은 뒤 이 PC 세션들이 쓴 금액(상태줄이 토큰을 API 가격으로 환산한 추정치)
+  const billed = Number(u.billed);
+  const billText = over ? `한도 초과 — 추가 과금${Number.isFinite(billed) ? ` ($${billed.toFixed(2)})` : ' 중'}` : '과금 없음';
+  box.innerHTML = meter('5시간', u.five_hour) + meter('주간', u.seven_day) +
+    `<div class="foot"><span class="bill ${over ? 'over' : ''}" title="${over ? '한도를 넘은 뒤 이 PC 의 세션들이 쓴 양을 API 가격으로 환산한 추정치예요 — 실제 청구액과 다를 수 있어요' : ''}">● ${billText}</span>
+      <span title="상태줄이 마지막으로 갱신된 시각 기준">${age < 60e3 ? '방금 전' : esc(ago(new Date(u.at).toISOString()))} 기준</span></div>`;
+  box.hidden = $('usageTitle').hidden = false;
+}
+
+// ── 다마고치 ──
+// 레벨은 주간 사용량 %(10%마다 1레벨)이라 주간 리셋 때 알로 돌아간다.
+// 그 주의 캐릭터는 주간 리셋 시각을 시드로 고른다 — 껐다 켜도 그 주 안에서는 같은 친구다.
+// 밥은 hook.cjs 가 응답이 끝날 때마다 pet.json 에 기록한다.
+// 도트는 pet-art.js — 미리보기 시트(app/pet-sheet.cjs)와 같이 쓴다. [이름, 아기, 어린이, 어른]
+const { PAL: PET_PAL, EGG, SPECIES } = window.PET_ART;
+// Lv.0 알 · 1~2 아기 · 3~5 어린이 · 6~10 어른(주간 사용량 60%) — 한도 근처까지 쓰지 않아도 어른이 되게.
+// 단계마다 도트가 따로 있어 크기는 같은 배율로 그린다
+const stageOf = (lv) => (lv === 0 ? '알' : lv < 3 ? '아기' : lv < 6 ? '어린이' : '어른');
+const STAGE_ART = { 아기: 1, 어린이: 2, 어른: 3 };
+const PET_PX = MINI ? 5 : 4;
+const DIGEST_MS = 30 * 60e3; // 밥 한 칸을 소화하는 시간 — hook.cjs 와 같은 값
+
+let petData = {};
+let lastUsage = null;
+let petCounts = { working: 0, waiting: 0 };
+let petSpriteKey = '';
+let petHappyUntil = 0;
+let petHatchUntil = 0;
+let petEditing = false;
+let petHappyLine = '';
+
+// 펫 대사 — 밥은 Claude 응답, 많이 먹으면(5시간 사용량) 배부르고 한도를 넘으면 배탈
+const PET_SAY = {
+  working: ['주인님이 일 시키는 중… 옆에서 응원 중! ✊', '쫑긋! 뭔가 열심히 만드는 소리가 나요', '밥 냄새가 나요… 곧 끝나려나?'],
+  crowd: '우와, 친구 {n}명이 동시에 일해요! 바빠 바빠',
+  eat: ['냠냠! 맛있다 😋', '꺼억~ 잘 먹었어요'],
+  waiting: ['주인님! 누가 불러요! 빨리 와 봐요', '똑똑, 대답해 줘야 해요 ({n})'],
+  hungry: ['꼬르륵… 일 좀 시켜 주세요', '심심해요… 놀아 줘요'],
+  sleep: ['쿨쿨… 냠냠 꿈 꾸는 중', 'zZ… 꿀잠 자는 중'],
+  tired: ['헥헥… 너무 많이 먹었나 봐요', '배불러서 움직이기 힘들어요'],
+  sick: ['배탈 났어요… 조금 쉬어요 🤒'],
+  pet: ['헤헤 ♥', '간지러워요~', '더 해 주세요!'],
+};
+// 같은 상태가 이어지면 12초마다 다음 대사로 넘어간다
+const pick = (list) => list[Math.floor(Date.now() / 12e3) % list.length];
+
+function petSvg(rows, px, closed) {
+  const w = Math.max(...rows.map((r) => r.length));
+  const rects = [];
+  rows.forEach((line, y) => [...line].forEach((ch, x) => {
+    const c = PET_PAL[ch];
+    if (!c) return;
+    // 잘 때는 눈을 아래쪽 반만 그려 감은 눈처럼
+    const [yy, hh] = ch === 'E' && closed ? [y + 0.6, 0.4] : [y, 1.02];
+    rects.push(`<rect x="${x}" y="${yy}" width="1.02" height="${hh}" fill="${c}"/>`);
+  }));
+  return `<svg width="${w * px}" height="${rows.length * px}" viewBox="0 0 ${w} ${rows.length}" shape-rendering="crispEdges">${rects.join('')}</svg>`;
+}
+
+function petView() {
+  const now = Date.now();
+  const live = (r) => r && r.used_percentage != null && !(r.resets_at && r.resets_at * 1000 <= now);
+  const wk = lastUsage && lastUsage.seven_day;
+  let week = live(wk) ? wk.resets_at : null;
+  let pct = week ? wk.used_percentage : 0;
+  let byTokens = false;
+  // 사용량이 오지 않는 계정(API 키 로그인 등)은 이번 주 출력 토큰으로 자란다 — 100만 토큰 = 100%
+  if (!week && petData.tokenWeek === weekKey()) {
+    week = `w${petData.tokenWeek}`;
+    pct = Math.min(100, ((petData.weekTokens || 0) / 1e6) * 100);
+    byTokens = true;
+  }
+  const lv = Math.min(10, Math.floor(pct / 10));
+  const stage = stageOf(lv);
+  const sp = week ? SPECIES[hash(String(week)) % SPECIES.length] : null;
+  const fh = lastUsage && live(lastUsage.five_hour) ? lastUsage.five_hour.used_percentage : 0;
+  const fedAgo = petData.lastFedAt ? now - petData.lastFedAt : Infinity;
+  // 한 끼에 +1칸, 30분에 1칸씩 연속으로 소화 — 예전 기록(food 없음)은 꽉 찬 상태에서 소화를 시작한다
+  const base = petData.food != null ? petData.food : petData.lastFedAt ? 5 : 0;
+  const since = petData.foodAt || petData.lastFedAt || now;
+  const food = Math.round(Math.max(0, Math.min(5, base - (now - since) / DIGEST_MS)));
+  return { now, week, pct, lv, stage, sp, fh, fedAgo, food, byTokens };
+}
+
+// record.cjs 의 weekKey 와 같은 식 — 이번 주 월요일(로컬) 날짜
+function weekKey(d = new Date()) {
+  const m = new Date(d.getFullYear(), d.getMonth(), d.getDate() - ((d.getDay() + 6) % 7));
+  return m.toLocaleDateString('sv');
+}
+
+function renderPet() {
+  if (petEditing) return;
+  const v = petView();
+  const egg = v.lv === 0 || !v.sp;
+
+  if (!egg) collect(v);
+
+  // 부화 직후 한 번 축하 — 그 주에 이미 봤으면 다시 띄우지 않는다
+  if (!egg) {
+    const key = `pet-hatched-${v.week}`;
+    let seen = true;
+    try { seen = !!localStorage.getItem(key); if (!seen) localStorage.setItem(key, '1'); } catch {}
+    if (!seen) petHatchUntil = v.now + 10e3;
+  }
+
+  const { working, waiting } = petCounts;
+  let mood, say;
+  if (egg) {
+    mood = working ? 'wobble' : 'still';
+    say = '두근두근! 누가 태어날까?';
+  } else if (petHatchUntil > v.now) { mood = 'hop'; say = '짠! 클마고치가 태어났어요'; }
+  else if (petHappyUntil > v.now) { mood = 'hop'; say = petHappyLine; }
+  else if (v.fh >= 100) { mood = 'sick'; say = pick(PET_SAY.sick); }
+  else if (waiting) { mood = 'shake'; say = pick(PET_SAY.waiting).replace('{n}', waiting); }
+  else if (v.fh >= 85) { mood = 'tired'; say = pick(PET_SAY.tired); }
+  else if (v.fedAgo < 60e3) {
+    mood = 'hop';
+    say = petData.overfullAt && v.now - petData.overfullAt < 60e3 ? '배불러요~ 더는 못 먹어요' : pick(PET_SAY.eat);
+  }
+  else if (working > 1) { mood = 'hop'; say = PET_SAY.crowd.replace('{n}', working); }
+  else if (working) { mood = 'hop'; say = pick(PET_SAY.working); }
+  else if (v.food === 0) { mood = 'still'; say = pick(PET_SAY.hungry); }
+  else { mood = 'sleep'; say = pick(PET_SAY.sleep); }
+
+  const sprite = $('petSprite');
+  const art = egg ? EGG : v.sp[STAGE_ART[v.stage]];
+  const closed = mood === 'sleep';
+  const key = [egg ? 'egg' : v.sp[0], v.stage, closed].join('|');
+  if (key !== petSpriteKey) {
+    sprite.querySelector('.pet-body').innerHTML = petSvg(art, PET_PX, closed);
+    petSpriteKey = key;
+  }
+  for (const c of ['hop', 'shake', 'wobble', 'sick']) sprite.classList.toggle(c, mood === c);
+  const fx = sprite.querySelector('.pet-fx');
+  const FX = { sleep: ['zz', 'zZ'], shake: ['bang', '!'], tired: ['sweat', '💧'], sick: ['sweat', '💧'] };
+  const [fxc, fxt] = (petHatchUntil > v.now && !egg) ? ['spark', '✦'] : FX[mood] || ['', ''];
+  fx.className = `pet-fx ${fxc}`;
+  fx.textContent = fxt;
+
+  const named = petData.name && petData.nameWeek === v.week;
+  $('petName').textContent = egg ? '알' : named ? petData.name : v.sp[0];
+  $('petName').title = egg ? '' : '더블클릭해서 이름 짓기';
+  $('petLv').textContent = `Lv.${v.lv} ${egg ? '' : v.stage}`.trim();
+  const meals = petData.mealsDate === new Date().toLocaleDateString('sv') ? petData.mealsToday || 0 : 0;
+  $('petFood').innerHTML = `밥 <b>${'▰'.repeat(v.food)}</b>${'▱'.repeat(5 - v.food)}`;
+  $('petFood').title = `오늘 ${meals}끼 — 응답이 끝날 때마다 한 칸씩 차고, ${DIGEST_MS / 60e3}분에 한 칸씩 소화해요`;
+  $('petSay').textContent = say;
+  if (MINI) {
+    // 데스크톱 펫은 평소엔 말이 없다 — 부를 때·먹을 때·부화·쓰다듬을 때만 말풍선(마우스를 올려도 보임)
+    const event = petHatchUntil > v.now || petHappyUntil > v.now || v.fedAgo < 60e3 || v.fh >= 100;
+    $('petSay').classList.toggle('show', !egg && (waiting > 0 || event));
+    $('petSay').classList.toggle('call', !egg && waiting > 0);
+    $('petSay').title = waiting ? '눌러서 그 세션으로 이동' : '';
+  }
+  const exp = v.lv >= 10 ? 100 : (v.pct % 10) * 10;
+  $('petExp').firstElementChild.style.width = `${exp}%`;
+  $('petExp').title = v.lv >= 10 ? '최고 레벨!'
+    : `${v.byTokens ? '이번 주 출력 토큰' : '주간 사용량'}으로 자라요 · 다음 레벨까지 ${Math.ceil(10 - (v.pct % 10))}%`;
+}
+
+// ── 버디 도감 ── 그 주의 친구와 최고 레벨을 기록한다(레벨이 오를 때만 저장 요청)
+let collecting = false;
+async function collect(v) {
+  const col = petData.collection || {};
+  const prev = col[v.week];
+  if (collecting || (prev && prev.species === v.sp[0] && prev.lv >= v.lv)) return;
+  collecting = true;
+  try {
+    const r = await api('/api/pet/collect', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ week: String(v.week), species: v.sp[0], lv: v.lv }) });
+    if (r.ok) petData.collection = await r.json();
+  } catch {}
+  collecting = false;
+  if (currentView === 'viewDex') renderDex();
+}
+
+function renderDex() {
+  const col = Object.values(petData.collection || {});
+  const best = new Map();
+  for (const c of col) {
+    // 파일에서 읽은 값이라 화면에 넣기 전에 숫자·알려진 이름으로 좁힌다
+    if (!c || !SPECIES.some((sp) => sp[0] === c.species)) continue;
+    const lv = Math.max(0, Math.min(10, Math.floor(Number(c.lv)) || 0));
+    const b = best.get(c.species) || { lv: 0, weeks: 0 };
+    best.set(c.species, { lv: Math.max(b.lv, lv), weeks: b.weeks + 1 });
+  }
+  // 못 만난 친구는 어린이 모습의 실루엣으로
+  const silhouette = (rows) => rows.map((r) => r.replace(/[^.]/g, 'k'));
+  $('dexCount').textContent = `${best.size} / ${SPECIES.length}`;
+  $('dex').innerHTML = SPECIES.map((sp) => {
+    const b = best.get(sp[0]);
+    if (!b) {
+      return `<div class="dex-cell unknown"><div class="dex-art">${petSvg(silhouette(sp[2]), 3, false)}</div>
+        <div class="dex-name">???</div><div class="dex-meta">아직 못 만났어요</div></div>`;
+    }
+    const stage = stageOf(b.lv);
+    return `<div class="dex-cell" title="${esc(sp[0])} — 최고 Lv.${b.lv} ${stage}">
+      <div class="dex-art">${petSvg(sp[STAGE_ART[stage]], 3, false)}</div>
+      <div class="dex-name">${esc(sp[0])}</div><div class="dex-meta">Lv.${b.lv} ${stage} · ${b.weeks}번</div></div>`;
+  }).join('');
+}
+
+// ── 데스크톱 펫 조작 ── 끌어서 옮기기 · 더블클릭으로 위젯 · 부르는 말풍선을 누르면 그 세션으로
+let dragged = false;
+if (MINI) {
+  const sprite = $('petSprite');
+  let drag = null;
+  // 창 위치 계산은 메인이 실제 커서 좌표로 한다 — 여기서는 시작·이동·끝만 알린다
+  sprite.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    drag = { x: e.screenX, y: e.screenY };
+    dragged = false;
+    sprite.setPointerCapture(e.pointerId);
+    dashApp.petDragStart();
+  });
+  sprite.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    if (!dragged && Math.abs(e.screenX - drag.x) + Math.abs(e.screenY - drag.y) < 4) return; // 클릭과 구분
+    dragged = true;
+    dashApp.petDragMove();
+  });
+  const endDrag = () => { if (drag) { drag = null; dashApp.petDragEnd(); } };
+  sprite.addEventListener('pointerup', endDrag);
+  sprite.addEventListener('pointercancel', endDrag);
+  sprite.addEventListener('lostpointercapture', endDrag);
+  sprite.addEventListener('dblclick', () => dashApp.setMini(false));
+
+  $('petSay').addEventListener('click', goWaiting);
+
+  // 펫·말풍선 위가 아니면 클릭이 아래 창으로 통과하게(끄는 중에는 유지)
+  let ignoring = null;
+  const setIgnore = (on) => { if (on !== ignoring) { ignoring = on; dashApp.petIgnore(on); } };
+  document.addEventListener('mousemove', (e) => {
+    if (drag) return setIgnore(false);
+    const say = $('petSay');
+    const overSay = e.target.closest && e.target.closest('.pet-say') && getComputedStyle(say).visibility === 'visible';
+    setIgnore(!(e.target.closest && e.target.closest('.pet-sprite')) && !overSay);
+  });
+  document.addEventListener('mouseleave', () => { if (!drag) setIgnore(true); });
+  setIgnore(true);
+}
+
+$('petSprite').onclick = () => {
+  if (dragged) { dragged = false; return; }
+  if (petView().lv === 0) return;
+  petHappyUntil = Date.now() + 2000;
+  petHappyLine = PET_SAY.pet[Math.floor(Math.random() * PET_SAY.pet.length)];
+  const h = document.createElement('span');
+  h.className = 'pet-heart';
+  h.textContent = '♥';
+  $('petSprite').appendChild(h);
+  setTimeout(() => h.remove(), 1000);
+  renderPet();
+};
+
+$('petName').ondblclick = () => {
+  const v = petView();
+  if (v.lv === 0 || !v.sp) return;
+  const el = $('petName');
+  const input = document.createElement('input');
+  input.className = 'name-input';
+  input.value = petData.nameWeek === v.week ? petData.name || '' : '';
+  input.placeholder = v.sp[0];
+  input.maxLength = 20;
+  petEditing = true;
+  el.replaceWith(input);
+  input.focus();
+  let done = false;
+  const finish = async (save) => {
+    if (done) return;
+    done = true;
+    if (save) {
+      try {
+        petData = await (await api('/api/pet', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: input.value, week: v.week }) })).json();
+      } catch {}
+    }
+    input.replaceWith(el);
+    petEditing = false;
+    renderPet();
+  };
+  input.onkeydown = (e) => { if (e.key === 'Enter') finish(true); if (e.key === 'Escape') finish(false); };
+  input.onblur = () => finish(true);
+};
+
+function measureFaces() {
+  const probe = document.createElement('span');
+  probe.className = 'face';
+  probe.style.cssText = 'position:absolute;visibility:hidden;width:auto';
+  app.appendChild(probe);
+  let max = 0;
+  for (const f of Object.values(FACES).flat(2)) {
+    probe.textContent = f;
+    max = Math.max(max, probe.getBoundingClientRect().width);
+  }
+  probe.remove();
+  app.style.setProperty('--face-w', `${Math.ceil(max)}px`);
+}
+measureFaces();
+document.fonts && document.fonts.ready.then(measureFaces);
+
+// 카오모지 프레임만 갈아끼운다 — 목록 전체를 다시 그리지 않아 깜빡임이 없다. 창이 안 보이면 쉰다.
+setInterval(() => {
+  if (document.hidden) return;
+  tick++;
+  for (const r of app.querySelectorAll('.row[data-id]')) {
+    const f = r.querySelector('.face');
+    if (f) f.textContent = frame(r.dataset.id, r.dataset.st);
+  }
+}, 700);
+
+function startEdit(btn) {
+  const row = btn.closest('.row');
+  const nameEl = row.querySelector('.name');
+  const input = document.createElement('input');
+  input.className = 'name-input';
+  input.value = btn.dataset.name || '';
+  input.placeholder = nameEl.textContent;
+  input.maxLength = 40;
+  editing = true;
+  nameEl.replaceWith(input);
+  btn.hidden = true;
+  input.focus();
+  let done = false;
+  const finish = async (save) => {
+    if (done) return;
+    done = true;
+    if (save) {
+      await api(`/api/name/${encodeURIComponent(row.dataset.id)}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: input.value }),
+      }).catch(() => {});
+    }
+    editing = false;
+    load();
+  };
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') finish(true);
+    if (e.key === 'Escape') finish(false);
+  });
+  input.addEventListener('blur', () => finish(true));
+  input.addEventListener('click', (e) => e.stopPropagation());
+}
+
+$('list').addEventListener('click', async (e) => {
+  const btn = e.target.closest('.edit');
+  if (btn) { e.stopPropagation(); return startEdit(btn); }
+  const row = e.target.closest('.row[data-id]');
+  if (!row || editing) return;
+  const id = row.dataset.id;
+
+  // ➜ 그 세션이 떠 있는 창(터미널·IDE)으로 이동
+  const go = e.target.closest('.go');
+  if (go) {
+    go.classList.add('busy');
+    let msg;
+    try {
+      const r = await api(`/api/focus/${encodeURIComponent(id)}`, { method: 'POST' });
+      const body = await r.json();
+      msg = r.ok
+        ? { ok: true, text: body.terminal ? 'ε=┌(˙▿˙)┘ 그 탭으로 이동했어요' : 'ε=┌(˙▿˙)┘ 창으로 이동했어요 (탭은 못 찾았어요)' }
+        : { ok: false, text: body.error || '창을 찾을 수 없어요' };
+    } catch {
+      msg = { ok: false, text: '서버 연결 끊김' };
+    }
+    rowMsgs.set(id, { ...msg, until: Date.now() + (msg.ok ? 2500 : 6000) });
+    return load();
+  }
+
+  // 요청 내용(3줄)을 눌렀을 때만 펼치고 접는다 — 글자를 고르는 중이면 그대로 둔다
+  if (!e.target.closest('.line.prompt') || selecting()) return;
+  if (expanded.has(id)) expanded.delete(id); else expanded.add(id);
+  render();
+});
+
+// Document Picture-in-Picture: 다른 창 위에 항상 떠 있는 작은 창 (Chrome·Edge 116+)
+const pin = $('pin');
+$('bell').onclick = goWaiting;
+$('quit').onclick = () => window.dashApp && dashApp.close();
+
+if (window.dashApp) {
+  // 위젯 앱: 📌 아이콘이 창 자체의 「위에 고정」을 토글한다
+  document.body.classList.add('desk');
+  const pinBtn = $('pinBtn');
+  const paint = (on) => {
+    pinBtn.classList.toggle('on', !!on);
+    pinBtn.title = on ? '위에 고정됨 — 눌러서 해제' : '다른 창 위에 항상 떠 있게';
+  };
+  pinBtn.hidden = false;
+  dashApp.getPin().then(paint);
+  pinBtn.onclick = async () => paint(await dashApp.setPin(!pinBtn.classList.contains('on')));
+  $('winMin').onclick = () => dashApp.minimize();
+  $('miniBtn').hidden = false;
+  $('miniBtn').onclick = () => dashApp.setMini(true);
+} else if ('documentPictureInPicture' in window) {
+  pin.hidden = false;
+  pin.onclick = async () => {
+    const pip = await documentPictureInPicture.requestWindow({ width: 460, height: 520 });
+    for (const st of document.querySelectorAll('style')) pip.document.head.appendChild(st.cloneNode(true));
+    pip.document.title = document.title;
+    pip.document.body.appendChild(app);
+    pin.hidden = true;
+    pip.addEventListener('pagehide', () => { document.body.appendChild(app); pin.hidden = false; });
+  };
+}
+
+// 변경 알림 — 서버가 끊기면 EventSource 가 알아서 다시 붙는다(retry 3초)
+const events = new EventSource(`/api/events?k=${encodeURIComponent(BUDDY_KEY || '')}`);
+events.onmessage = () => load();
+events.onerror = () => { disconnected = true; render(); };
+// 시간만 흐르는 표시(경과 시간·소화·리셋까지 남은 시간) — 보일 때만 5초마다
+setInterval(() => { if (!document.hidden) render(); }, 5000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) render(); });

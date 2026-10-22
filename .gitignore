@@ -1,0 +1,19 @@
+node_modules/
+dist/
+*.log
+*.tmp
+.env*
+# 실행 중 만들어지는 데이터는 저장소에 들어오지 않는다(원래 ~/.claude/session-dash 에 쌓인다)
+sessions/
+names.json
+pet.json
+usage.json
+hook-token
+prev-statusline.json
+focus-request.json
+focus-response-*.json
+win-v2.dll
+resources/*.vsix
+prefs.json
+buddy-win-*.dll
+overage.json

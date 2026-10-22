@@ -1,0 +1,12 @@
+{
+  "name": "claude-buddy-terminal-focus",
+  "displayName": "Claude Buddy Terminal Focus",
+  "description": "Shows the terminal tab that runs a Claude Code session when you press ➜ in Claude Buddy. Unofficial, not affiliated with Anthropic.",
+  "version": "0.2.0",
+  "publisher": "soooru",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/soooru/claude-buddy" },
+  "engines": { "vscode": "^1.80.0" },
+  "activationEvents": ["onStartupFinished"],
+  "main": "./extension.js"
+}

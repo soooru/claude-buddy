@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Buddy</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<style>
+  :root {
+    --bg: #17181c; --row: #212328; --row-hover: #282b31; --line: #2e3138;
+    --text: #e8e9ec; --muted: #8b9099; --title: #f783ac;
+    --working: #51cf66; --waiting: #ff922b; --done: #4dabf7; --idle: #5c616b;
+  }
+  * { box-sizing: border-box; }
+  /* 얇고 둥근 스크롤바 — 마우스를 올렸을 때만 진해진다 */
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; border: 2px solid var(--bg); }
+  ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+  ::-webkit-scrollbar-corner { background: transparent; }
+  .detail .full::-webkit-scrollbar-thumb { border-color: var(--bg); }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font: 13px/1.45 "Pretendard", "Malgun Gothic", system-ui, sans-serif; }
+  #app { padding: 14px 12px 12px; }
+  header { display: flex; align-items: baseline; gap: 10px; padding: 0 4px 12px; margin-bottom: 12px;
+    border-bottom: 1px solid var(--line); }
+  h1 { margin: 0; font-size: 16px; font-weight: 700; color: var(--title); white-space: nowrap; }
+  .sub { color: var(--muted); min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sub .w { color: var(--waiting); font-weight: 600; }
+  .pin { margin-left: auto; flex: none; background: none; border: 1px solid var(--line); color: var(--muted);
+    border-radius: 6px; padding: 2px 8px; font: inherit; font-size: 12px; cursor: pointer; }
+  .pin:hover { color: var(--text); border-color: var(--muted); }
+  .pin.on { color: var(--title); border-color: var(--title); }
+  .winbtn { display: none; flex: none; background: none; border: 0; color: var(--muted); font: inherit;
+    font-size: 14px; width: 26px; height: 22px; border-radius: 4px; cursor: pointer; line-height: 1; }
+  .winbtn:hover { color: var(--text); background: var(--row-hover); }
+  /* ✕ 는 창만 닫는다 — 앱은 트레이에서 계속 기록한다 */
+  .winbtn.x { color: #fa5252; }
+  .winbtn.x:hover { background: #c92a2a; color: #fff; }
+  /* 위젯 앱(Electron) 안에서는 헤더가 창 제목표시줄을 대신한다 */
+  body.desk header { -webkit-app-region: drag; user-select: none; align-items: center; }
+  body.desk header button { -webkit-app-region: no-drag; }
+  body.desk .winbtn { display: inline-block; }
+  body.desk .pin + .winbtn { margin-left: 2px; }
+  .list { display: flex; flex-direction: column; gap: 8px; }
+  .row { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; row-gap: 2px;
+    background: var(--row); border-radius: 6px; border-left: 4px solid var(--c); padding: 8px 12px 8px 14px; }
+  .row:hover { background: var(--row-hover); }
+  .line.prompt { cursor: pointer; border-radius: 4px; }
+  .line.prompt:hover { background: var(--bg); }
+  .line.prompt:hover .t { color: var(--text); }
+  .fold { flex: none; color: var(--muted); font-size: 11px; padding-right: 4px; }
+  .go { flex: none; background: none; border: 1px solid var(--line); border-radius: 5px; color: var(--muted);
+    font: inherit; font-size: 12px; padding: 0 7px; cursor: pointer; margin-top: 2px; }
+  .go:hover { color: var(--text); border-color: var(--c); background: var(--bg); }
+  .go:active { transform: scale(.94); }
+  .go.busy { color: var(--c); border-color: var(--c); }
+  .row-msg { grid-column: 1 / -1; font-size: 12px; color: var(--waiting); padding-left: 2px; }
+  .row-msg.ok { color: var(--c); }
+  .detail { grid-column: 1 / -1; margin-top: 6px; padding-top: 8px; border-top: 1px dashed var(--line);
+    display: flex; flex-direction: column; gap: 8px; font-size: 12px; cursor: auto; }
+  .detail h4 { margin: 0 0 2px; font-size: 11px; font-weight: 600; color: var(--muted); }
+  .detail .full { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto;
+    background: var(--bg); border-radius: 4px; padding: 6px 8px; }
+  .detail ol, .detail ul { margin: 0; padding-left: 18px; }
+  .detail li { overflow-wrap: anywhere; }
+  .detail .stats { color: var(--muted); }
+  /* 프레임마다 글자 폭이 달라 이름이 흔들리지 않게 가장 넓은 프레임 폭(--face-w)으로 고정한다 */
+  .face { flex: none; display: inline-block; width: var(--face-w, auto); color: var(--c); white-space: nowrap;
+    font-family: "Segoe UI Symbol", "Malgun Gothic", sans-serif; }
+  .count { color: var(--muted); font-size: 12px; padding: 0 4px 6px; }
+  .usage { display: flex; flex-direction: column; gap: 5px; background: var(--row); border-radius: 6px;
+    padding: 8px 12px; margin-bottom: 12px; font-size: 12px; }
+  .usage .u { display: grid; grid-template-columns: 40px minmax(0, 1fr) 38px 64px; align-items: center; gap: 8px; }
+  .usage .k { color: var(--muted); }
+  .usage .bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+  .usage .bar i { display: block; height: 100%; background: var(--uc); border-radius: 3px; }
+  .usage .p { color: var(--uc); font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
+  .usage .r { color: var(--muted); white-space: nowrap; }
+  .usage .foot { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; }
+  .usage .bill { color: var(--working); }
+  .usage .bill.over { color: #fa5252; font-weight: 700; }
+  .usage.stale .u { opacity: .55; }
+  [hidden] { display: none !important; }
+  .iconbtn { flex: none; background: none; border: 0; color: var(--muted); width: 26px; height: 22px; border-radius: 4px;
+    cursor: pointer; display: inline-flex; align-items: center; justify-content: center; padding: 0; }
+  .iconbtn:hover, .iconbtn.on { color: var(--text); background: var(--row-hover); }
+  /* 제목 바로 옆에 🔔(부를 때만), 나머지 아이콘은 오른쪽 끝 — 빈 칸(spacer)이 남는 폭을 가진다 */
+  header .spacer { flex: 1; }
+  header .bell { margin-left: -4px; }
+  header .iconbtn { color: #c3c7cf; }
+  header .iconbtn:hover { color: #fff; }
+  #miniBtn { color: var(--title); }
+  .iconbtn { position: relative; }
+  #pinBtn.on { color: var(--title); }
+  .bell.on { color: var(--waiting); }
+  .bell.on svg { animation: ring 1.6s ease-in-out infinite; transform-origin: 50% 10%; }
+  .bell .badge { position: absolute; top: -2px; right: -1px; min-width: 14px; height: 14px; padding: 0 3px;
+    border-radius: 7px; background: var(--waiting); color: #17181c; font-size: 10px; font-weight: 700; line-height: 14px; }
+  @keyframes ring { 0%, 60%, 100% { transform: rotate(0); } 10%, 30% { transform: rotate(14deg); } 20%, 40% { transform: rotate(-14deg); } }
+
+  /* ── 미니 모드(데스크톱 펫): 투명 창에 펫과 말풍선만 ── */
+  html:has(body.mini), body.mini { background: transparent !important; overflow: hidden; }
+  body.mini #app { padding: 0; height: 100vh; }
+  body.mini header, body.mini .view, body.mini #offwork, body.mini #usageTitle, body.mini #usage,
+  body.mini #count, body.mini #list, body.mini #err, body.mini .pet-head, body.mini .pet-exp { display: none !important; }
+  body.mini .pet { background: none; padding: 0 0 6px; margin: 0; height: 100vh; flex-direction: column-reverse;
+    justify-content: flex-start; align-items: center; gap: 2px; }
+  body.mini .pet-sprite { width: 120px; height: 80px; cursor: grab; }
+  body.mini .pet-sprite:active { cursor: grabbing; }
+  body.mini .pet-info { flex: none; align-items: center; max-width: 210px; }
+  body.mini .pet-say { visibility: hidden; position: relative; background: var(--row); border: 1px solid var(--line);
+    border-radius: 10px; padding: 4px 10px; font-size: 12px; box-shadow: 0 4px 14px rgba(0, 0, 0, .35);
+    max-width: 210px; overflow: hidden; text-overflow: ellipsis; }
+  body.mini .pet-say::after { content: ''; position: absolute; left: 50%; bottom: -5px; width: 8px; height: 8px;
+    background: var(--row); border-right: 1px solid var(--line); border-bottom: 1px solid var(--line);
+    transform: translateX(-50%) rotate(45deg); }
+  body.mini .pet-say.show, body.mini .pet:hover .pet-say { visibility: visible; }
+  body.mini .pet-say.call { color: var(--waiting); font-weight: 700; cursor: pointer; border-color: var(--waiting); }
+  body.desk header .iconbtn { -webkit-app-region: no-drag; }
+  header { position: relative; }
+  .menu { position: absolute; top: 30px; right: 54px; z-index: 10; min-width: 150px; background: var(--row);
+    border: 1px solid var(--line); border-radius: 8px; padding: 4px; box-shadow: 0 6px 20px rgba(0, 0, 0, .45);
+    display: flex; flex-direction: column; -webkit-app-region: no-drag; }
+  .menu button { background: none; border: 0; color: var(--text); font: inherit; text-align: left; padding: 6px 10px;
+    border-radius: 5px; cursor: pointer; }
+  .menu button:hover { background: var(--row-hover); }
+  .view-head { display: flex; align-items: center; gap: 8px; font-weight: 700; padding: 0 4px 10px; }
+  .view-head .muted { font-weight: 400; margin-left: auto; }
+  .back { background: none; border: 1px solid var(--line); color: var(--muted); border-radius: 5px; font: inherit;
+    padding: 0 8px; cursor: pointer; }
+  .back:hover { color: var(--text); border-color: var(--muted); }
+  .prefs { background: var(--row); border-radius: 6px; padding: 10px 12px; margin-bottom: 8px; display: flex;
+    flex-direction: column; gap: 8px; font-size: 12px; }
+  .dex { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+  .dex-cell { background: var(--row); border-radius: 6px; padding: 8px 4px 6px; display: flex; flex-direction: column;
+    align-items: center; gap: 4px; min-height: 96px; }
+  .dex-art { height: 52px; display: flex; align-items: flex-end; justify-content: center; }
+  .dex-name { font-size: 12px; font-weight: 700; }
+  .dex-meta { font-size: 11px; color: var(--muted); }
+  .dex-cell.unknown .dex-name { color: var(--muted); }
+  .dex-note { font-size: 11px; padding: 10px 4px 0; }
+  .prefs-row { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+  .prefs-row input[type=checkbox] { accent-color: var(--title); margin: 0; }
+  .prefs-row input[type=time] { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line);
+    border-radius: 4px; padding: 1px 6px; color-scheme: dark; }
+  .muted { color: var(--muted); }
+  .offwork { color: var(--muted); font-size: 12px; padding: 0 4px 6px; }
+  /* 상태 표시 영역은 글자를 고를 일이 없다 — 창이 포커스를 받을 때 선택 하이라이트가 남지 않게 */
+  .offwork, .pet, .count, .usage, header h1, .sub { user-select: none; }
+  .offwork b { color: var(--text); font-weight: 700; }
+  .offwork.done b { color: var(--working); }
+  /* 다마고치 */
+  .pet { display: flex; align-items: center; gap: 12px; background: var(--row); border-radius: 6px;
+    padding: 8px 12px; margin-bottom: 8px; }
+  .pet-sprite { flex: none; position: relative; width: 60px; height: 52px; display: flex; align-items: flex-end;
+    justify-content: center; cursor: pointer; user-select: none; }
+  .pet-body svg { display: block; }
+  .pet-sprite.hop .pet-body { animation: hop .7s ease-in-out infinite; }
+  .pet-sprite.shake .pet-body { animation: shake .45s ease-in-out infinite; }
+  .pet-sprite.wobble .pet-body { animation: wobble 1.4s ease-in-out infinite; transform-origin: 50% 100%; }
+  .pet-sprite.sick .pet-body { filter: saturate(.35) brightness(.85); }
+  .pet-fx { position: absolute; top: -4px; right: 0; font-size: 11px; font-weight: 700; pointer-events: none; }
+  .pet-fx.zz { color: var(--muted); animation: zz 2s ease-in-out infinite; }
+  .pet-fx.bang { color: var(--waiting); font-size: 14px; animation: zz .8s ease-in-out infinite; }
+  .pet-fx.sweat { color: #74c0fc; }
+  .pet-fx.spark { color: #fcc419; animation: zz .6s ease-in-out infinite; }
+  .pet-heart { position: absolute; left: 50%; bottom: 36px; color: #f783ac; pointer-events: none;
+    animation: heart 1s ease-out forwards; }
+  @keyframes hop { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+  @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-2px); } 75% { transform: translateX(2px); } }
+  @keyframes wobble { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-7deg); } 75% { transform: rotate(7deg); } }
+  @keyframes zz { 0%, 100% { opacity: .35; transform: translateY(0); } 50% { opacity: 1; transform: translateY(-3px); } }
+  @keyframes heart { from { opacity: 1; transform: translate(-50%, 0); } to { opacity: 0; transform: translate(-50%, -20px); } }
+  .pet-info { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3px; }
+  .pet-head { display: flex; align-items: baseline; gap: 8px; white-space: nowrap; min-width: 0; }
+  .pet-name { font-weight: 700; color: var(--title); overflow: hidden; text-overflow: ellipsis; cursor: text; }
+  .pet-lv { color: var(--muted); font-size: 12px; }
+  .pet-food { margin-left: auto; color: var(--muted); font-size: 12px; }
+  .pet-food b { color: var(--waiting); font-weight: 400; }
+  .pet-say { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pet-exp { height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; }
+  .pet-exp i { display: block; height: 100%; background: var(--title); border-radius: 2px; }
+  .row.idle .face { color: var(--muted); }
+  .main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .head { display: flex; align-items: baseline; gap: 8px; min-width: 0; white-space: nowrap; }
+  .name { font-weight: 700; font-size: 14px; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .side { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; white-space: nowrap; }
+  .side .time { color: var(--muted); font-size: 12px; }
+  .edit { flex: none; background: none; border: 0; padding: 0 2px; color: var(--muted); cursor: pointer;
+    font-size: 12px; opacity: 0; }
+  .row:hover .edit { opacity: 1; }
+  .edit:hover { color: var(--text); }
+  .name-input { font: inherit; font-weight: 700; font-size: 14px; color: var(--text); background: var(--bg);
+    border: 1px solid var(--title); border-radius: 4px; padding: 0 6px; width: 180px; min-width: 0; outline: none; }
+  .meta { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .say { color: var(--c); font-size: 12px; font-weight: 600; }
+  .row.idle .say { color: var(--muted); font-weight: 400; }
+  .line { grid-column: 1 / -1; display: flex; gap: 10px; min-width: 0; padding-left: 2px; }
+  .line .q { color: var(--muted); flex: none; width: 14px; }
+  .line .t { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tool { color: var(--muted); font-size: 12px; }
+  .tool .spin { display: inline-block; width: 10px; height: 10px; border-radius: 50%; vertical-align: -1px;
+    border: 1.5px solid color-mix(in srgb, var(--c) 25%, transparent); border-top-color: var(--c);
+    animation: spin 1s linear infinite; }
+  .alert { color: var(--waiting); font-weight: 600; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .empty, .err { color: var(--muted); padding: 24px 4px; text-align: center; }
+  .err { padding: 8px 4px 0; font-size: 12px; }
+  @media (max-width: 420px) { .row { grid-template-columns: 1fr; } .face { font-size: 12px; } }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1 id="total">CLAUDE BUDDY</h1>
+    <button class="iconbtn bell" id="bell" title="부르는 세션 없음" aria-label="알림" hidden><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M8 1.5a1 1 0 0 1 1 1v.6a4.5 4.5 0 0 1 3.5 4.4v2.3l1.2 1.8a.6.6 0 0 1-.5.9H2.8a.6.6 0 0 1-.5-.9l1.2-1.8V7.5A4.5 4.5 0 0 1 7 3.1v-.6a1 1 0 0 1 1-1zM6.3 13.5h3.4a1.7 1.7 0 0 1-3.4 0z"/></svg><span class="badge" id="bellCount" hidden></span></button>
+    <span class="spacer"></span>
+    <button class="pin" id="pin" hidden title="다른 창 위에 항상 떠 있는 작은 창으로 분리">위에 띄우기</button>
+    <button class="iconbtn" id="pinBtn" title="다른 창 위에 항상 떠 있게" aria-label="위에 고정" hidden><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M10.2 1.3l4.5 4.5-1.3 1.3-.9-.4-2.4 2.4.3 2.8-1.1 1.1-2.6-2.6-3.6 3.6-.9-.9 3.6-3.6-2.6-2.6L4.3 5.8l2.8.3 2.4-2.4-.4-.9z"/></svg></button>
+    <button class="iconbtn" id="miniBtn" title="미니 모드 — 펫만 띄우기 (펫을 더블클릭하면 돌아와요)" aria-label="미니 모드" hidden><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><g fill="currentColor"><ellipse cx="3.2" cy="7" rx="1.6" ry="2"/><ellipse cx="6.1" cy="3.9" rx="1.6" ry="2.1"/><ellipse cx="9.9" cy="3.9" rx="1.6" ry="2.1"/><ellipse cx="12.8" cy="7" rx="1.6" ry="2"/><path d="M8 7.6c2.1 0 4.1 2.6 4.1 4.6 0 1.3-1 1.9-2.1 1.9-.8 0-1.3-.4-2-.4s-1.2.4-2 .4c-1.1 0-2.1-.6-2.1-1.9 0-2 2-4.6 4.1-4.6z"/></g></svg></button>
+    <button class="iconbtn" id="gear" title="설정" aria-label="설정"><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M9.4 1l.3 1.9c.4.1.8.3 1.1.5l1.6-1.1 1.3 1.3-1.1 1.6c.2.4.4.7.5 1.1L15 6.6v1.8l-1.9.3c-.1.4-.3.8-.5 1.1l1.1 1.6-1.3 1.3-1.6-1.1c-.4.2-.7.4-1.1.5L9.4 14H7.6l-.3-1.9c-.4-.1-.8-.3-1.1-.5l-1.6 1.1-1.3-1.3 1.1-1.6c-.2-.4-.4-.7-.5-1.1L2 8.4V6.6l1.9-.3c.1-.4.3-.8.5-1.1L3.3 3.6l1.3-1.3 1.6 1.1c.4-.2.7-.4 1.1-.5L7.6 1h1.8zM8.5 5.3a2.2 2.2 0 1 0 0 4.4 2.2 2.2 0 0 0 0-4.4z"/></svg></button>
+    <button class="winbtn" id="winMin" title="최소화">–</button>
+    <button class="winbtn x" id="quit" title="닫기 — 트레이에서 계속 기록해요">✕</button>
+    <div class="menu" id="menu" hidden role="menu">
+      <button role="menuitem" data-view="viewOff">🏠 퇴근 시간</button>
+      <button role="menuitem" data-view="viewDex">📖 버디 도감</button>
+    </div>
+  </header>
+
+  <!-- 설정 화면(탭) — 메뉴에서 고르면 본 화면 대신 보인다 -->
+  <section class="view" id="viewOff" hidden>
+    <div class="view-head"><button class="back" data-back>←</button><span>퇴근 시간</span></div>
+    <div class="prefs">
+      <label class="prefs-row"><input type="checkbox" id="prefOff"> 퇴근까지 남은 시간 표시</label>
+      <label class="prefs-row">퇴근 시간 <input type="time" id="prefOffTime" value="18:00" step="60"> <span class="muted">KST</span></label>
+      <div class="muted">한 번 정하면 다시 바꿀 때까지 유지돼요. 주말에는 「쉬는 날」로 보여요.</div>
+    </div>
+  </section>
+  <section class="view" id="viewDex" hidden>
+    <div class="view-head"><button class="back" data-back>←</button><span>버디 도감</span><span class="muted" id="dexCount"></span></div>
+    <div class="dex" id="dex"></div>
+    <div class="muted dex-note">매주 알에서 한 친구가 태어나요. 한 번 만난 친구는 여기 남고, 가장 많이 키운 모습으로 보여요.</div>
+  </section>
+
+  <div id="mainView">
+  <div class="offwork" id="offwork" hidden></div>
+  <div class="pet" id="pet">
+    <div class="pet-sprite" id="petSprite" title="쓰다듬기"><div class="pet-body"></div><span class="pet-fx"></span></div>
+    <div class="pet-info">
+      <div class="pet-head"><span class="pet-name" id="petName"></span><span class="pet-lv" id="petLv"></span>
+        <span class="pet-food" id="petFood"></span></div>
+      <div class="pet-say" id="petSay"></div>
+      <div class="pet-exp" id="petExp"><i></i></div>
+    </div>
+  </div>
+  <div class="count" id="usageTitle" hidden title="계정 전체의 5시간·주간 사용 한도 — 100%가 되면 리셋 때까지 추가 과금">총 사용량</div>
+  <div class="usage" id="usage" hidden></div>
+  <div class="count" id="count"></div>
+  <div class="list" id="list"></div>
+  <div class="err" id="err"></div>
+  </div>
+</div>
+<script src="/pet-art.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>
