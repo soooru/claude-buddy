@@ -53,7 +53,6 @@ Claude Code 세션들을 한눈에 보는 **Windows 트레이 앱**입니다. �
 | **Windows 10/11** | 필수 (macOS · Linux 미지원) |
 | **Claude Code** (터미널 CLI · Cursor/VS Code 터미널에서 쓰는 `claude`) | 필수 — claude.ai 웹·데스크톱 앱 채팅은 대상이 아닙니다 |
 | **Git Bash** | 필수 — Windows 용 Claude Code 를 설치할 때 함께 쓰는 Git for Windows 에 들어 있습니다 |
-| Node.js · npm | **필요 없음** — 설치 파일 하나로 끝납니다 |
 | 관리자 권한 | 필요 없음 |
 
 **요금제에 따라 보이는 것**
@@ -67,7 +66,7 @@ Claude Code 세션들을 한눈에 보는 **Windows 트레이 앱**입니다. �
 
 ## 설치
 
-먼저 [누가 쓸 수 있나요?](#누가-쓸-수-있나요) 의 조건을 확인하세요. Node.js 는 필요 없습니다.
+먼저 [누가 쓸 수 있나요?](#누가-쓸-수-있나요) 의 조건을 확인하세요.
 
 1. **Claude Code 를 최신으로** 업데이트합니다.
    ```
