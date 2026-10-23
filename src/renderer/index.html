@@ -95,7 +95,7 @@
   .iconbtn { position: relative; }
   #pinBtn.on { color: var(--title); }
   .bell.on { color: var(--waiting); }
-  .bell.on svg { animation: ring 1.6s ease-in-out infinite; transform-origin: 50% 10%; }
+  .bell.on svg { animation: ring 1.6s steps(1) infinite; transform-origin: 50% 10%; }
   .bell .badge { position: absolute; top: -2px; right: -1px; min-width: 14px; height: 14px; padding: 0 3px;
     border-radius: 7px; background: var(--waiting); color: #17181c; font-size: 10px; font-weight: 700; line-height: 14px; }
   @keyframes ring { 0%, 60%, 100% { transform: rotate(0); } 10%, 30% { transform: rotate(14deg); } 20%, 40% { transform: rotate(-14deg); } }
@@ -157,15 +157,15 @@
   .pet-sprite { flex: none; position: relative; width: 60px; height: 52px; display: flex; align-items: flex-end;
     justify-content: center; cursor: pointer; user-select: none; }
   .pet-body svg { display: block; }
-  .pet-sprite.hop .pet-body { animation: hop .7s ease-in-out infinite; }
-  .pet-sprite.shake .pet-body { animation: shake .45s ease-in-out infinite; }
-  .pet-sprite.wobble .pet-body { animation: wobble 1.4s ease-in-out infinite; transform-origin: 50% 100%; }
+  .pet-sprite.hop .pet-body { animation: hop .7s steps(1) infinite; }
+  .pet-sprite.shake .pet-body { animation: shake .45s steps(1) infinite; }
+  .pet-sprite.wobble .pet-body { animation: wobble 1.4s steps(1) infinite; transform-origin: 50% 100%; }
   .pet-sprite.sick .pet-body { filter: saturate(.35) brightness(.85); }
   .pet-fx { position: absolute; top: -4px; right: 0; font-size: 11px; font-weight: 700; pointer-events: none; }
-  .pet-fx.zz { color: var(--muted); animation: zz 2s ease-in-out infinite; }
-  .pet-fx.bang { color: var(--waiting); font-size: 14px; animation: zz .8s ease-in-out infinite; }
+  .pet-fx.zz { color: var(--muted); animation: zz 2s steps(1) infinite; }
+  .pet-fx.bang { color: var(--waiting); font-size: 14px; animation: zz .8s steps(1) infinite; }
   .pet-fx.sweat { color: #74c0fc; }
-  .pet-fx.spark { color: #fcc419; animation: zz .6s ease-in-out infinite; }
+  .pet-fx.spark { color: #fcc419; animation: zz .6s steps(1) infinite; }
   .pet-heart { position: absolute; left: 50%; bottom: 36px; color: #f783ac; pointer-events: none;
     animation: heart 1s ease-out forwards; }
   @keyframes hop { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
@@ -203,7 +203,7 @@
   .tool { color: var(--muted); font-size: 12px; }
   .tool .spin { display: inline-block; width: 10px; height: 10px; border-radius: 50%; vertical-align: -1px;
     border: 1.5px solid color-mix(in srgb, var(--c) 25%, transparent); border-top-color: var(--c);
-    animation: spin 1s linear infinite; }
+    animation: spin 1s steps(8) infinite; }
   .alert { color: var(--waiting); font-weight: 600; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .empty, .err { color: var(--muted); padding: 24px 4px; text-align: center; }

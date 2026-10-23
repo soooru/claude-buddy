@@ -129,7 +129,8 @@ function openWidget({ show = true } = {}) {
   widget.on('moved', remember);
   widget.on('resized', remember);
   widget.buddyShow = show;
-  widget.once('ready-to-show', () => { if (widget && widget.buddyShow) widget.show(); });
+  // 미리 만든 창은 hide() 를 한 번 불러야 페이지가 「숨김」이 된다 — show:false 만으로는 보이는 페이지처럼 그리고 연결을 유지한다
+  widget.once('ready-to-show', () => { if (widget) (widget.buddyShow ? widget.show() : widget.hide()); });
   keepOnClose(widget);
   widget.on('closed', () => { widget = null; refreshTray(); });
   widget.loadURL(`${ORIGIN}/`);
@@ -189,7 +190,7 @@ function openPet({ show = true } = {}) {
     writeJson(STATE(), { ...readJson(STATE(), {}), petBounds: { x, y } });
   });
   petWin.buddyShow = show;
-  petWin.once('ready-to-show', () => { if (petWin && petWin.buddyShow) petWin.showInactive(); });
+  petWin.once('ready-to-show', () => { if (petWin) (petWin.buddyShow ? petWin.showInactive() : petWin.hide()); });
   keepOnClose(petWin);
   petWin.on('closed', () => { petWin = null; refreshTray(); });
   petWin.loadURL(`${ORIGIN}/?mini=1`);

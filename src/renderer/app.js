@@ -1,6 +1,12 @@
 // 「위에 띄우기」로 다른 문서에 옮겨져도 찾을 수 있게 #app 기준으로 조회한다
 const app = document.getElementById('app');
 const $ = (id) => app.querySelector('#' + id);
+// 5초마다 다시 그린다 — 값이 같으면 DOM 을 건드리지 않아야 다시 칠하지 않는다(투명 펫 창은 칠할 때마다 창 전체를 갱신한다)
+const setText = (el, v) => { if (el.textContent !== v) el.textContent = v; };
+const lastHtml = new WeakMap();
+const setHtml = (el, v) => { if (lastHtml.get(el) !== v) { el.innerHTML = v; lastHtml.set(el, v); } };
+const setTitle = (el, v) => { if (el.title !== v) el.title = v; };
+const setHidden = (el, v) => { if (el.hidden !== v) el.hidden = v; };
 // 기록 API 는 앱이 건네준 키가 있어야 응답한다(같은 PC 의 다른 계정·브라우저는 못 읽는다)
 const BUDDY_KEY = window.dashApp ? window.dashApp.key() : null;
 const api = (url, opts = {}) => fetch(url, { ...opts, headers: { ...(opts.headers || {}), 'X-Buddy-Key': BUDDY_KEY || '' } });
@@ -155,7 +161,7 @@ function render() {
   if (editing || selecting()) return;
   const err = $('err');
   if (disconnected || !data) {
-    err.textContent = disconnected ? '서버 연결 끊김 — 트레이의 Claude Buddy 가 켜져 있는지 확인해 주세요' : '';
+    setText(err, disconnected ? '서버 연결 끊김 — 트레이의 Claude Buddy 가 켜져 있는지 확인해 주세요' : '');
     return;
   }
   {
@@ -165,25 +171,25 @@ function render() {
       Date.parse(b.updatedAt || b.startedAt) - Date.parse(a.updatedAt || a.startedAt));
     const n = (...k) => sessions.filter((s) => k.includes(s.state)).length;
     const waiting = n('waiting');
-    $('count').textContent = `작업 세션 ${sessions.length}개 · 작업 중 ${n('working')}개`;
+    setText($('count'), `작업 세션 ${sessions.length}개 · 작업 중 ${n('working')}개`);
     petCounts = { working: n('working'), waiting };
     renderOffWork();
     renderUsage();
-    $('bell').hidden = !waiting; // 누가 부를 때만 나타난다
+    setHidden($('bell'), !waiting); // 누가 부를 때만 나타난다
     $('bell').classList.toggle('on', waiting > 0);
-    $('bellCount').hidden = !waiting;
-    $('bellCount').textContent = waiting > 9 ? '9+' : String(waiting);
-    $('bell').title = waiting ? `작업자 ${waiting}명이 불러요! — 눌러서 이동` : '부르는 세션 없음';
+    setHidden($('bellCount'), !waiting);
+    setText($('bellCount'), waiting > 9 ? '9+' : String(waiting));
+    setTitle($('bell'), waiting ? `작업자 ${waiting}명이 불러요! — 눌러서 이동` : '부르는 세션 없음');
     // 펼친 응답을 스크롤해 둔 위치를 다시 그린 뒤에도 유지
     const scrolls = new Map([...app.querySelectorAll('.row[data-id] .full')].map((el) => [el.closest('.row').dataset.id, el.scrollTop]));
-    $('list').innerHTML =
-      sessions.map(row).join('') || `<div class="empty">${FACES.idle[0][2]} 다들 퇴근했어요</div>`;
+    setHtml($('list'), sessions.map(row).join('') || `<div class="empty">${FACES.idle[0][2]} 다들 퇴근했어요</div>`);
     for (const [id, top] of scrolls) {
       const el = app.querySelector(`.row[data-id="${CSS.escape(id)}"] .full`);
-      if (el) el.scrollTop = top;
+      if (el && el.scrollTop !== top) el.scrollTop = top;
     }
-    err.textContent = liveCheck === 'ok' || liveCheck === 'pending' ? '' : `생존 확인 불가: ${liveCheck}`;
-    document.title = waiting ? `(${waiting}) 불러요! — Claude Buddy` : 'Claude Buddy';
+    setText(err, liveCheck === 'ok' || liveCheck === 'pending' ? '' : `생존 확인 불가: ${liveCheck}`);
+    const title = waiting ? `(${waiting}) 불러요! — Claude Buddy` : 'Claude Buddy';
+    if (document.title !== title) document.title = title;
   }
 }
 
@@ -198,19 +204,19 @@ function kstNow() {
 }
 function renderOffWork() {
   const box = $('offwork');
-  box.hidden = !prefs.showOffWork;
+  setHidden(box, !prefs.showOffWork);
   if (box.hidden) return;
   const [oh, om] = prefs.offWork.split(':').map(Number);
   const now = kstNow();
   const left = oh * 60 + om - now.minutes;
   box.classList.toggle('done', left <= 0 || now.weekday === 'Sat' || now.weekday === 'Sun');
-  if (now.weekday === 'Sat' || now.weekday === 'Sun') box.innerHTML = '🏖 <b>오늘은 쉬는 날이에요</b>';
-  else if (left <= 0) box.innerHTML = '🎉 <b>퇴근 시간이에요! 수고하셨어요</b>';
+  if (now.weekday === 'Sat' || now.weekday === 'Sun') setHtml(box, '🏖 <b>오늘은 쉬는 날이에요</b>');
+  else if (left <= 0) setHtml(box, '🎉 <b>퇴근 시간이에요! 수고하셨어요</b>');
   else {
     const h = Math.floor(left / 60), m = left % 60;
-    box.innerHTML = `🏠 퇴근까지 <b>${h ? `${h}시간 ` : ''}${m}분</b>`;
+    setHtml(box, `🏠 퇴근까지 <b>${h ? `${h}시간 ` : ''}${m}분</b>`);
   }
-  box.title = `퇴근 시간 ${prefs.offWork} (KST) — ⚙ 에서 바꿀 수 있어요`;
+  setTitle(box, `퇴근 시간 ${prefs.offWork} (KST) — ⚙ 에서 바꿀 수 있어요`);
 }
 
 async function savePrefs(patch) {
@@ -256,7 +262,7 @@ function renderUsage() {
   const box = $('usage');
   const u = lastUsage;
   renderPet();
-  if (!u || !u.at || !(u.five_hour || u.seven_day)) { box.hidden = $('usageTitle').hidden = true; return; }
+  if (!u || !u.at || !(u.five_hour || u.seven_day)) { setHidden(box, true); setHidden($('usageTitle'), true); return; }
   const meter = (label, r) => {
     if (!r) return '';
     const p = Math.max(0, Math.min(100, Math.round(r.used_percentage)));
@@ -273,10 +279,11 @@ function renderUsage() {
   // 한도를 넘은 뒤 이 PC 세션들이 쓴 금액(상태줄이 토큰을 API 가격으로 환산한 추정치)
   const billed = Number(u.billed);
   const billText = over ? `한도 초과 — 추가 과금${Number.isFinite(billed) ? ` ($${billed.toFixed(2)})` : ' 중'}` : '과금 없음';
-  box.innerHTML = meter('5시간', u.five_hour) + meter('주간', u.seven_day) +
+  setHtml(box, meter('5시간', u.five_hour) + meter('주간', u.seven_day) +
     `<div class="foot"><span class="bill ${over ? 'over' : ''}" title="${over ? '한도를 넘은 뒤 이 PC 의 세션들이 쓴 양을 API 가격으로 환산한 추정치예요 — 실제 청구액과 다를 수 있어요' : ''}">● ${billText}</span>
-      <span title="상태줄이 마지막으로 갱신된 시각 기준">${age < 60e3 ? '방금 전' : esc(ago(new Date(u.at).toISOString()))} 기준</span></div>`;
-  box.hidden = $('usageTitle').hidden = false;
+      <span title="상태줄이 마지막으로 갱신된 시각 기준">${age < 60e3 ? '방금 전' : esc(ago(new Date(u.at).toISOString()))} 기준</span></div>`);
+  setHidden(box, false);
+  setHidden($('usageTitle'), false);
 }
 
 // ── 다마고치 ──
@@ -406,28 +413,29 @@ function renderPet() {
   const fx = sprite.querySelector('.pet-fx');
   const FX = { sleep: ['zz', 'zZ'], shake: ['bang', '!'], tired: ['sweat', '💧'], sick: ['sweat', '💧'] };
   const [fxc, fxt] = (petHatchUntil > v.now && !egg) ? ['spark', '✦'] : FX[mood] || ['', ''];
-  fx.className = `pet-fx ${fxc}`;
-  fx.textContent = fxt;
+  if (fx.className !== `pet-fx ${fxc}`) fx.className = `pet-fx ${fxc}`;
+  setText(fx, fxt);
 
   const named = petData.name && petData.nameWeek === v.week;
-  $('petName').textContent = egg ? '알' : named ? petData.name : v.sp[0];
-  $('petName').title = egg ? '' : '더블클릭해서 이름 짓기';
-  $('petLv').textContent = `Lv.${v.lv} ${egg ? '' : v.stage}`.trim();
+  setText($('petName'), egg ? '알' : named ? petData.name : v.sp[0]);
+  setTitle($('petName'), egg ? '' : '더블클릭해서 이름 짓기');
+  setText($('petLv'), `Lv.${v.lv} ${egg ? '' : v.stage}`.trim());
   const meals = petData.mealsDate === new Date().toLocaleDateString('sv') ? petData.mealsToday || 0 : 0;
-  $('petFood').innerHTML = `밥 <b>${'▰'.repeat(v.food)}</b>${'▱'.repeat(5 - v.food)}`;
-  $('petFood').title = `오늘 ${meals}끼 — 응답이 끝날 때마다 한 칸씩 차고, ${DIGEST_MS / 60e3}분에 한 칸씩 소화해요`;
-  $('petSay').textContent = say;
+  setHtml($('petFood'), `밥 <b>${'▰'.repeat(v.food)}</b>${'▱'.repeat(5 - v.food)}`);
+  setTitle($('petFood'), `오늘 ${meals}끼 — 응답이 끝날 때마다 한 칸씩 차고, ${DIGEST_MS / 60e3}분에 한 칸씩 소화해요`);
+  setText($('petSay'), say);
   if (MINI) {
     // 데스크톱 펫은 평소엔 말이 없다 — 부를 때·먹을 때·부화·쓰다듬을 때만 말풍선(마우스를 올려도 보임)
     const event = petHatchUntil > v.now || petHappyUntil > v.now || v.fedAgo < 60e3 || v.fh >= 100;
     $('petSay').classList.toggle('show', !egg && (waiting > 0 || event));
     $('petSay').classList.toggle('call', !egg && waiting > 0);
-    $('petSay').title = waiting ? '눌러서 그 세션으로 이동' : '';
+    setTitle($('petSay'), waiting ? '눌러서 그 세션으로 이동' : '');
   }
   const exp = v.lv >= 10 ? 100 : (v.pct % 10) * 10;
-  $('petExp').firstElementChild.style.width = `${exp}%`;
-  $('petExp').title = v.lv >= 10 ? '최고 레벨!'
-    : `${v.byTokens ? '이번 주 출력 토큰' : '주간 사용량'}으로 자라요 · 다음 레벨까지 ${Math.ceil(10 - (v.pct % 10))}%`;
+  const bar = $('petExp').firstElementChild;
+  if (bar.style.width !== `${exp}%`) bar.style.width = `${exp}%`;
+  setTitle($('petExp'), v.lv >= 10 ? '최고 레벨!'
+    : `${v.byTokens ? '이번 주 출력 토큰' : '주간 사용량'}으로 자라요 · 다음 레벨까지 ${Math.ceil(10 - (v.pct % 10))}%`);
 }
 
 // ── 버디 도감 ── 그 주의 친구와 최고 레벨을 기록한다(레벨이 오를 때만 저장 요청)
@@ -604,6 +612,7 @@ function startEdit(btn) {
       }).catch(() => {});
     }
     editing = false;
+    lastHtml.delete($('list')); // 입력칸으로 바꿔 둔 줄을 같은 내용이어도 다시 그린다
     load();
   };
   input.addEventListener('keydown', (e) => {
@@ -677,9 +686,20 @@ if (window.dashApp) {
 }
 
 // 변경 알림 — 서버가 끊기면 EventSource 가 알아서 다시 붙는다(retry 3초)
-const events = new EventSource(`/api/events?k=${encodeURIComponent(BUDDY_KEY || '')}`);
-events.onmessage = () => load();
-events.onerror = () => { disconnected = true; render(); };
+// 숨겨 둔 창은 연결을 끊는다: 훅마다 다시 읽지 않고, 서버도 보는 창이 없으면 세션 생존 확인(claude agents)을 멈춘다.
+// 처음 한 번은 숨긴 채로도 읽어 둔다 — 창을 띄우는 순간 빈 화면이 보이지 않게.
+let events = null;
+const listen = () => {
+  if (events) return;
+  events = new EventSource(`/api/events?k=${encodeURIComponent(BUDDY_KEY || '')}`);
+  events.onmessage = () => load();
+  events.onerror = () => { disconnected = true; render(); };
+};
+if (document.hidden) load(); else listen();
 // 시간만 흐르는 표시(경과 시간·소화·리셋까지 남은 시간) — 보일 때만 5초마다
 setInterval(() => { if (!document.hidden) render(); }, 5000);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) render(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { if (events) { events.close(); events = null; } return; }
+  render();
+  listen(); // 연결되자마자 서버가 change 를 보내 최신으로 다시 읽는다
+});
