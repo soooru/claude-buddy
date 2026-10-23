@@ -10,7 +10,9 @@ contextBridge.exposeInMainWorld('dashApp', {
   petDragStart: () => ipcRenderer.send('pet:dragStart'),
   petDragMove: () => ipcRenderer.send('pet:dragMove'),
   petDragEnd: () => ipcRenderer.send('pet:dragEnd'),
-  petIgnore: (ignore) => ipcRenderer.send('pet:ignore', ignore === true),
+  // 펫·말풍선 자리(CSS px) — 메인이 커서가 그 위에 있을 때만 클릭을 받는다
+  petHit: (hit) => ipcRenderer.send('pet:hit', hit),
+  onPetHover: (cb) => { ipcRenderer.on('pet:hover', (_e, over) => cb(over === true)); },
   // 기록 API 키 — 메인이 우리 페이지인지 확인한 뒤에만 준다
   key: () => ipcRenderer.sendSync('auth:key'),
 });

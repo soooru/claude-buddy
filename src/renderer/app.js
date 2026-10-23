@@ -430,6 +430,7 @@ function renderPet() {
     $('petSay').classList.toggle('show', !egg && (waiting > 0 || event));
     $('petSay').classList.toggle('call', !egg && waiting > 0);
     setTitle($('petSay'), waiting ? '눌러서 그 세션으로 이동' : '');
+    sendPetHit();
   }
   const exp = v.lv >= 10 ? 100 : (v.pct % 10) * 10;
   const bar = $('petExp').firstElementChild;
@@ -507,17 +508,18 @@ if (MINI) {
 
   $('petSay').addEventListener('click', goWaiting);
 
-  // 펫·말풍선 위가 아니면 클릭이 아래 창으로 통과하게(끄는 중에는 유지)
-  let ignoring = null;
-  const setIgnore = (on) => { if (on !== ignoring) { ignoring = on; dashApp.petIgnore(on); } };
-  document.addEventListener('mousemove', (e) => {
-    if (drag) return setIgnore(false);
-    const say = $('petSay');
-    const overSay = e.target.closest && e.target.closest('.pet-say') && getComputedStyle(say).visibility === 'visible';
-    setIgnore(!(e.target.closest && e.target.closest('.pet-sprite')) && !overSay);
-  });
-  document.addEventListener('mouseleave', () => { if (!drag) setIgnore(true); });
-  setIgnore(true);
+  // 펫·말풍선 위가 아니면 클릭이 아래 창으로 통과한다 — 판정은 메인이 커서 위치로 하고, 여기서는 자리만 알린다
+  dashApp.onPetHover((over) => { $('pet').classList.toggle('hover', over); sendPetHit(); });
+  window.addEventListener('resize', sendPetHit);
+}
+
+let lastHit = '';
+function sendPetHit() {
+  if (!MINI) return;
+  const box = (el) => { const r = el.getBoundingClientRect(); return [r.left, r.top, r.width, r.height].map(Math.round); };
+  const hit = { sprite: box($('petSprite')), say: box($('petSay')), sayShown: $('petSay').classList.contains('show') };
+  const key = JSON.stringify(hit);
+  if (key !== lastHit) { lastHit = key; dashApp.petHit(hit); }
 }
 
 $('petSprite').onclick = () => {

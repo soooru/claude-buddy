@@ -137,7 +137,7 @@ function openWidget({ show = true } = {}) {
   refreshTray();
 }
 
-// ── 미니 모드(데스크톱 펫) ── 투명 창에 펫만. 펫이 아닌 곳은 클릭이 아래 창으로 통과한다(pet:ignore).
+// ── 미니 모드(데스크톱 펫) ── 투명 창에 펫만. 펫이 아닌 곳은 클릭이 아래 창으로 통과한다(petTick).
 const PET_W = 220, PET_H = 170;
 // 펫 창은 대부분 투명 여백이고 펫은 아래쪽 가운데에 그려진다(가장 큰 도트 약 65×60, 아래 여백 6).
 // 창 전체가 아니라 펫 그림이 화면 안에 있게 가두면, 투명 여백은 화면 밖으로 나가고 펫은 가장자리에 붙을 수 있다.
@@ -184,6 +184,9 @@ function openPet({ show = true } = {}) {
     webPreferences: secureWebPreferences(),
   });
   petWin.setAlwaysOnTop(true, 'floating');
+  petWin.setIgnoreMouseEvents(true);
+  petWin.on('show', () => watchPetCursor(true));
+  petWin.on('hide', () => watchPetCursor(false));
   petWin.on('moved', () => {
     if (!petWin) return;
     const { x, y } = petWin.getBounds();
@@ -192,7 +195,7 @@ function openPet({ show = true } = {}) {
   petWin.buddyShow = show;
   petWin.once('ready-to-show', () => { if (petWin) (petWin.buddyShow ? petWin.showInactive() : petWin.hide()); });
   keepOnClose(petWin);
-  petWin.on('closed', () => { petWin = null; refreshTray(); });
+  petWin.on('closed', () => { clearInterval(petPoll); petPoll = null; petWin = null; refreshTray(); });
   petWin.loadURL(`${ORIGIN}/?mini=1`);
   refreshTray();
 }
@@ -340,9 +343,35 @@ ipcMain.on('pet:dragEnd', (e) => {
   fix();
   setTimeout(fix, 120); // 모니터 배율 변경(WM_DPICHANGED) 처리가 끝난 뒤 한 번 더
 });
-ipcMain.on('pet:ignore', (e, ignore) => {
-  if (!fromUs(e) || !petWin || BrowserWindow.fromWebContents(e.sender) !== petWin) return;
-  petWin.setIgnoreMouseEvents(ignore === true, { forward: true });
+// ── 클릭 통과 ── 펫·말풍선 위가 아니면 클릭이 아래 창으로 간다.
+// setIgnoreMouseEvents 의 forward 옵션은 쓰지 않는다 — Windows 에서 전역 저수준 마우스 훅을 메인 스레드에 걸어,
+// 메인이 잠깐만 바빠도(훅 기록·파일 읽기) PC 전체의 마우스가 ~300ms 씩 멈췄다. 대신 커서 위치를 직접 확인한다.
+let petHit = null;
+let petOver = false;
+let petPoll = null;
+const inRect = (p, r) => r && p.x >= r[0] && p.x < r[0] + r[2] && p.y >= r[1] && p.y < r[1] + r[3];
+function petTick() {
+  if (!petWin || petWin.isDestroyed() || !petWin.isVisible()) return;
+  if (petDrag || !petHit) return; // 끄는 중에는 커서가 펫보다 앞서 나가도 놓치지 않게 그대로 둔다
+  const c = cursorPx();
+  const r = screen.dipToScreenRect(petWin, petWin.getBounds()); // 창·커서 모두 실제 픽셀 — 배율이 섞인 모니터에서도 맞다
+  const k = r.width / PET_W;
+  const p = { x: (c.x - r.x) / k, y: (c.y - r.y) / k };
+  const over = inRect(p, petHit.sprite) || ((petHit.sayShown || petOver) && inRect(p, petHit.say));
+  if (over === petOver) return;
+  petOver = over;
+  petWin.setIgnoreMouseEvents(!over);
+  petWin.webContents.send('pet:hover', over);
+}
+function watchPetCursor(on) {
+  clearInterval(petPoll);
+  petPoll = on ? setInterval(petTick, 50) : null;
+  if (!on && petWin && !petWin.isDestroyed()) { petOver = false; petWin.setIgnoreMouseEvents(true); }
+}
+const rect4 = (a) => (Array.isArray(a) && a.length === 4 && a.every((n) => Number.isFinite(n) && Math.abs(n) <= 4000) ? a : null);
+ipcMain.on('pet:hit', (e, hit) => {
+  if (!isPetSender(e) || !hit || typeof hit !== 'object') return;
+  petHit = { sprite: rect4(hit.sprite), say: rect4(hit.say), sayShown: hit.sayShown === true };
 });
 
 const setupStatus = () => ({
