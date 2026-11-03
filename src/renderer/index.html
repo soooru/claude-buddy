@@ -150,6 +150,28 @@
     padding: 6px 16px; cursor: pointer; }
   .game-over button:hover { border-color: var(--title); }
   .game-btn { width: 24px; height: 20px; font-size: 13px; line-height: 1; padding: 0; }
+  .games { display: flex; flex-direction: column; gap: 8px; }
+  .game-pick { display: flex; align-items: center; gap: 12px; background: var(--row); border: 1px solid transparent; border-radius: 6px;
+    color: var(--text); font: inherit; text-align: left; padding: 10px 12px; cursor: pointer; }
+  .game-pick:hover { background: var(--row-hover); border-color: var(--line); }
+  .game-pick > span:nth-child(2) { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .game-pick .muted { font-size: 12px; }
+  .gp-icon { font-size: 22px; }
+  .gp-best { margin-left: auto; white-space: nowrap; }
+  .match { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+  .mcard { position: relative; height: 78px; padding: 0; border: 1px solid var(--line); border-radius: 6px; cursor: pointer;
+    background: repeating-linear-gradient(45deg, var(--row), var(--row) 6px, var(--row-hover) 6px, var(--row-hover) 12px);
+    font: inherit; color: var(--text); transition: transform .15s; }
+  .mcard::after { content: '?'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    color: var(--muted); font-size: 22px; font-weight: 700; }
+  .mcard:hover { border-color: var(--muted); }
+  .mface { display: none; height: 100%; flex-direction: column; align-items: center; justify-content: flex-end; gap: 2px; padding-bottom: 4px; }
+  .mface small { font-size: 11px; color: var(--muted); }
+  .mcard.open { background: var(--row); transform: scale(1.03); }
+  .mcard.open::after { content: none; }
+  .mcard.open .mface { display: flex; }
+  .mcard.done { border-color: var(--title); cursor: default; transform: none; }
+  .mcard.done small { color: var(--title); }
   .dex-note { font-size: 11px; padding: 10px 4px 0; }
   .prefs-row { display: flex; align-items: center; gap: 8px; cursor: pointer; }
   .prefs-row input[type=checkbox] { accent-color: var(--title); margin: 0; }
@@ -236,7 +258,7 @@
     <div class="menu" id="menu" hidden role="menu">
       <button role="menuitem" data-view="viewOff">🏠 퇴근 시간</button>
       <button role="menuitem" data-view="viewDex">📖 버디 도감</button>
-      <button role="menuitem" data-view="viewGame">🍚 밥 받기</button>
+      <button role="menuitem" data-view="viewGames">🎮 미니게임</button>
     </div>
   </header>
 
@@ -255,8 +277,26 @@
     <div class="muted dex-note">매주 알에서 한 친구가 태어나요. 한 번 만난 친구는 여기 남고, 가장 많이 키운 모습으로 보여요.</div>
   </section>
 
+  <section class="view" id="viewGames" hidden>
+    <div class="view-head"><button class="back" data-back>←</button><span>미니게임</span></div>
+    <div class="games">
+      <button class="game-pick" data-game="viewGame"><span class="gp-icon">🍚</span>
+        <span><b>밥 받기</b><span class="muted">30초 동안 떨어지는 밥을 받아요</span></span><span class="muted gp-best" id="bestFood"></span></button>
+      <button class="game-pick" data-game="viewMatch"><span class="gp-icon">📖</span>
+        <span><b>도감 짝 맞추기</b><span class="muted">카드를 뒤집어 같은 친구를 찾아요</span></span><span class="muted gp-best" id="bestMatch"></span></button>
+    </div>
+    <div class="muted dex-note">점수는 펫의 기분에만 영향을 줘요. 레벨과 밥 칸은 그대로예요.</div>
+  </section>
+  <section class="view" id="viewMatch" hidden>
+    <div class="view-head"><button class="back" data-back="viewGames">←</button><span>도감 짝 맞추기</span><span class="muted" id="matchHud"></span></div>
+    <div class="game">
+      <div class="match" id="match"></div>
+      <div class="game-over" id="matchMsg" hidden></div>
+    </div>
+    <div class="muted dex-note">만난 친구는 가장 많이 키운 모습으로, 못 만난 친구는 실루엣으로 나와요. 적게 뒤집을수록 좋은 기록!</div>
+  </section>
   <section class="view" id="viewGame" hidden>
-    <div class="view-head"><button class="back" data-back>←</button><span>밥 받기</span><span class="muted" id="gameHud"></span></div>
+    <div class="view-head"><button class="back" data-back="viewGames">←</button><span>밥 받기</span><span class="muted" id="gameHud"></span></div>
     <div class="game">
       <canvas id="gameCanvas"></canvas>
       <div class="game-over" id="gameMsg"></div>
@@ -270,7 +310,7 @@
     <div class="pet-sprite" id="petSprite" title="쓰다듬기"><div class="pet-body"></div><span class="pet-fx"></span></div>
     <div class="pet-info">
       <div class="pet-head"><span class="pet-name" id="petName"></span><span class="pet-lv" id="petLv"></span>
-        <span class="pet-food" id="petFood"></span><button class="iconbtn game-btn" id="gameBtn" title="밥 받기 — 30초 미니게임">🎮</button></div>
+        <span class="pet-food" id="petFood"></span><button class="iconbtn game-btn" id="gameBtn" title="미니게임">🎮</button></div>
       <div class="pet-say" id="petSay"></div>
       <div class="pet-exp" id="petExp"><i></i></div>
     </div>

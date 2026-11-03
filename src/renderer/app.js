@@ -247,9 +247,12 @@ function showView(id) {
   if (id === 'viewOff') { $('prefOff').checked = !!prefs.showOffWork; $('prefOffTime').value = prefs.offWork; }
   if (id === 'viewDex') renderDex();
   if (id === 'viewGame') gameReady();
+  if (id === 'viewGames') renderGames();
+  if (id === 'viewMatch') matchStart();
 }
 for (const b of menu.querySelectorAll('[data-view]')) b.onclick = () => { closeMenu(); showView(b.dataset.view); };
-for (const b of app.querySelectorAll('[data-back]')) b.onclick = () => showView(null);
+// data-back 에 화면 id 가 있으면 그 화면으로(게임 → 미니게임 목록), 비어 있으면 본 화면으로
+for (const b of app.querySelectorAll('[data-back]')) b.onclick = () => showView(b.dataset.back || null);
 $('prefOff').onchange = (e) => savePrefs({ showOffWork: e.target.checked });
 $('prefOffTime').onchange = (e) => { if (/^\d{2}:\d{2}$/.test(e.target.value)) savePrefs({ offWork: e.target.value }); };
 
@@ -517,7 +520,8 @@ async function collect(v) {
   if (currentView === 'viewDex') renderDex();
 }
 
-function renderDex() {
+// 도감에서 캐릭터별 최고 레벨·만난 주 수 — 도감과 짝 맞추기가 같이 쓴다
+function dexBest() {
   const entries = Object.entries(petData.collection || {});
   // 예전 버전은 주간 초기화 직후 토큰 주로 잘못 넘어가 못 본 친구를 기록했다 —
   // 사용량 주와 일주일 안쪽으로 겹치는 토큰 주(w...)는 그 흔적이라 빼고 센다
@@ -532,8 +536,13 @@ function renderDex() {
     const b = best.get(c.species) || { lv: 0, weeks: 0 };
     best.set(c.species, { lv: Math.max(b.lv, lv), weeks: b.weeks + 1 });
   }
-  // 못 만난 친구는 어린이 모습의 실루엣으로
-  const silhouette = (rows) => rows.map((r) => r.replace(/[^.]/g, 'k'));
+  return best;
+}
+// 못 만난 친구는 어린이 모습의 실루엣으로
+const silhouette = (rows) => rows.map((r) => r.replace(/[^.]/g, 'k'));
+
+function renderDex() {
+  const best = dexBest();
   $('dexCount').textContent = `${best.size} / ${SPECIES.length}`;
   $('dex').innerHTML = SPECIES.map((sp) => {
     const b = best.get(sp[0]);
@@ -648,7 +657,97 @@ function gameStart() {
   gameMsg();
   game.start();
 }
-$('gameBtn').onclick = (e) => { e.stopPropagation(); showView('viewGame'); };
+$('gameBtn').onclick = (e) => { e.stopPropagation(); showView('viewGames'); };
+
+// ── 미니게임 목록 ── 게임마다 최고 기록을 같이 보인다
+function renderGames() {
+  const food = gameBest();
+  const match = matchBest();
+  setText($('bestFood'), food ? `최고 ${food}점` : '아직 기록 없음');
+  setText($('bestMatch'), match ? `최고 ${match}번 만에` : '아직 기록 없음');
+}
+for (const b of app.querySelectorAll('[data-game]')) b.onclick = () => showView(b.dataset.game);
+
+// ── 도감 짝 맞추기 ── 카드 12장(6쌍)을 뒤집어 같은 친구를 찾는다. 시간 제한 없이 몇 번 뒤집었는지로 겨룬다.
+// 만난 친구는 가장 많이 키운 모습, 못 만난 친구는 실루엣 — 모양은 달라 짝은 맞출 수 있다
+const MATCH_PAIRS = 6;
+let match = null;
+function matchBest() {
+  try { return Number(localStorage.getItem('match-best')) || 0; } catch { return 0; }
+}
+function matchStart() {
+  const best = dexBest();
+  // 만난 친구를 먼저 다 넣고(6마리가 넘으면 그중 무작위 6), 모자란 자리만 못 만난 친구로 채운다
+  const shuffle = (a) => a.map((x) => [Math.random(), x]).sort((p, q) => p[0] - q[0]).map(([, x]) => x);
+  const met = shuffle(SPECIES.filter((sp) => best.has(sp[0])));
+  const unmet = shuffle(SPECIES.filter((sp) => !best.has(sp[0])));
+  const pool = [...met, ...unmet].slice(0, MATCH_PAIRS);
+  const cards = [];
+  for (const sp of pool) {
+    const b = best.get(sp[0]);
+    const art = b ? sp[STAGE_ART[stageOf(Math.max(1, b.lv))]] : silhouette(sp[2]);
+    const card = { name: b ? sp[0] : '???', svg: petSvg(art, 3, false) };
+    cards.push({ ...card, id: sp[0] }, { ...card, id: sp[0] });
+  }
+  // 피셔-예이츠 섞기
+  for (let i = cards.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [cards[i], cards[j]] = [cards[j], cards[i]];
+  }
+  match = { cards, open: [], done: new Set(), tries: 0, lock: false };
+  $('matchMsg').hidden = true;
+  $('match').innerHTML = cards.map((c, i) => `<button class="mcard" data-i="${i}" aria-label="카드 ${i + 1}">
+    <span class="mface">${c.svg}<small>${esc(c.name)}</small></span></button>`).join('');
+  for (const el of $('match').querySelectorAll('.mcard')) el.onclick = () => matchFlip(Number(el.dataset.i));
+  matchHud();
+}
+function matchHud() {
+  const best = matchBest();
+  setText($('matchHud'), `${match.tries}번 뒤집음 · ${match.done.size}/${MATCH_PAIRS}쌍${best ? ` · 최고 ${best}번` : ''}`);
+}
+function matchFlip(i) {
+  const m = match;
+  if (!m || m.lock || m.done.has(m.cards[i].id) || m.open.includes(i)) return;
+  const el = (k) => $('match').querySelector(`[data-i="${k}"]`);
+  el(i).classList.add('open');
+  m.open.push(i);
+  if (m.open.length < 2) return;
+  m.tries++;
+  const [a, b] = m.open;
+  if (m.cards[a].id === m.cards[b].id) {
+    m.done.add(m.cards[a].id);
+    el(a).classList.add('done'); el(b).classList.add('done');
+    m.open = [];
+    matchHud();
+    if (m.done.size === MATCH_PAIRS) matchEnd();
+    return;
+  }
+  m.lock = true;
+  matchHud();
+  setTimeout(() => {
+    el(a).classList.remove('open'); el(b).classList.remove('open');
+    m.open = []; m.lock = false;
+  }, 800);
+}
+function matchEnd() {
+  const tries = match.tries;
+  const best = matchBest();
+  const record = !best || tries < best;
+  if (record) { try { localStorage.setItem('match-best', String(tries)); } catch {} }
+  const box = $('matchMsg');
+  box.hidden = false;
+  box.innerHTML = `<b>${record ? '🎉 최고 기록!' : '다 찾았어요!'} ${tries}번 만에</b>
+    <span class="muted">최고 ${record ? tries : best}번 · 6쌍이면 6번이 가장 좋은 기록이에요</span>`;
+  for (const [label, fn] of [['한 판 더', matchStart], ['펫 보러 가기', () => showView(null)]]) {
+    const btn = document.createElement('button');
+    btn.textContent = label;
+    btn.onclick = fn;
+    box.appendChild(btn);
+  }
+  petHappyUntil = Date.now() + 5000;
+  petHappyLine = tries <= 9 ? '우와, 기억력 천재! 친구들이 다 기억났어요' : tries <= 14 ? `${tries}번 만에 다 찾았어요! 또 해요` : '헤헤, 친구들 얼굴 많이 봤죠?';
+  matchHud();
+}
 
 $('petName').ondblclick = () => {
   const v = petView();
