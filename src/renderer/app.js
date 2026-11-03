@@ -301,6 +301,8 @@ const levelSpan = (lv) => [lv === 0 ? 0 : lv === 1 ? HATCH_PCT : lv * 10, lv ===
 const stageOf = (lv) => (lv === 0 ? '알' : lv < 3 ? '아기' : lv < 6 ? '어린이' : '어른');
 const STAGE_ART = { 아기: 1, 어린이: 2, 어른: 3 };
 const PET_PX = MINI ? 5 : 4;
+// 위젯과 데스크톱 펫은 localStorage 를 같이 쓴다 — 새 알·작별 알림은 창마다 따로 한 번씩 보이게
+const WIN = MINI ? '-mini' : '';
 const DIGEST_MS = 30 * 60e3; // 밥 한 칸을 소화하는 시간 — hook.cjs 와 같은 값
 
 let petData = {};
@@ -309,6 +311,9 @@ let petCounts = { working: 0, waiting: 0 };
 let petSpriteKey = '';
 let petHappyUntil = 0;
 let petHatchUntil = 0;
+let petArriveUntil = 0; // 주가 바뀌어 새 알이 온 걸 알리는 동안
+let petArriveLine = '';
+let petByeUntil = 0; // 리셋 하루 전에 한 번 띄우는 작별 인사
 let petEditing = false;
 let petHappyLine = '';
 
@@ -354,6 +359,11 @@ function petView() {
     pct = Math.min(100, ((petData.weekTokens || 0) / 1e6) * 100);
     byTokens = true;
   }
+  // 새 알이 오는 시각 — 사용량 계정은 주간 리셋, 토큰 계정은 다음 주 월요일 0시(로컬)
+  const today = new Date(now);
+  const resetAt = !week ? null : byTokens
+    ? new Date(today.getFullYear(), today.getMonth(), today.getDate() - ((today.getDay() + 6) % 7) + 7).getTime()
+    : wk.resets_at * 1000;
   const lv = levelOf(pct);
   const stage = stageOf(lv);
   const sp = week ? SPECIES[hash(String(week)) % SPECIES.length] : null;
@@ -363,12 +373,40 @@ function petView() {
   const base = petData.food != null ? petData.food : petData.lastFedAt ? 5 : 0;
   const since = petData.foodAt || petData.lastFedAt || now;
   const food = Math.round(Math.max(0, Math.min(5, base - (now - since) / DIGEST_MS)));
-  return { now, week, pct, lv, stage, sp, fh, fedAgo, food, byTokens };
+  return { now, week, pct, lv, stage, sp, fh, fedAgo, food, byTokens, resetAt };
 }
 
 // 주간 사용량을 받아 본 계정 — 지난 사용량이 남아 있거나 도감에 사용량 주(resets_at 키)가 있다
 function hasUsageAccount() {
   return !!(lastUsage && lastUsage.seven_day) || Object.keys(petData.collection || {}).some((k) => !k.startsWith('w'));
+}
+
+// 한 번만 띄울 일을 창마다 기억한다 — 처음이면 true
+function firstTime(key) {
+  try { if (localStorage.getItem(key)) return false; localStorage.setItem(key, '1'); return true; } catch { return false; }
+}
+
+// 받침이 있으면 '은', 없으면(영문 이름 포함) '는'
+const topic = (w) => { const c = w.charCodeAt(w.length - 1) - 0xac00; return c >= 0 && c < 11172 && c % 28 ? '은' : '는'; };
+
+// 새 알 도착 인사 — 지난주 친구(이번 주가 아닌 도감 기록 중 가장 최근)를 함께 알려 준다.
+// 지난주에 부화를 못 했으면 그 전 주 친구를 「지난주」라 부르지 않도록 지난주 안의 기록만 본다
+function arriveLine(v) {
+  const since = v.resetAt ? v.resetAt - 14 * 864e5 : 0;
+  const last = Object.entries(petData.collection || {})
+    .filter(([k, c]) => k !== String(v.week) && c && (c.at || 0) >= since && SPECIES.some((sp) => sp[0] === c.species))
+    .map(([, c]) => c).sort((a, b) => (b.at || 0) - (a.at || 0))[0];
+  if (!last) return '새 알이 도착했어요! 이번 주엔 누가 태어날까?';
+  const lv = Math.max(0, Math.min(10, Math.floor(Number(last.lv)) || 0));
+  return `새 알이 도착했어요! 지난주 ${last.species}${topic(last.species)} 도감에 있어요 (최고 Lv.${lv} ${stageOf(lv)})`;
+}
+
+// 리셋 24시간 전부터의 작별 대사 — 남은 시간과, 어른이 아직이면 남은 사용량을 같이
+function byeLine(v, egg) {
+  const h = Math.max(1, Math.ceil((v.resetAt - v.now) / 36e5));
+  if (egg) return `${h}시간 뒤면 새 알로 바뀌어요… 부화까지 ${Math.ceil(HATCH_PCT - v.pct)}%!`;
+  if (v.stage !== '어른') return `어른까지 ${Math.ceil(60 - v.pct)}% 남았어요! ${h}시간 안에 될까요?`;
+  return `${h}시간 뒤면 새 알이 와요… 오늘 많이 놀아 줘요!`;
 }
 
 // record.cjs 의 weekKey 와 같은 식 — 이번 주 월요일(로컬) 날짜
@@ -385,18 +423,27 @@ function renderPet() {
   if (!egg) collect(v);
 
   // 부화 직후 한 번 축하 — 그 주에 이미 봤으면 다시 띄우지 않는다
-  if (!egg) {
-    const key = `pet-hatched-${v.week}`;
-    let seen = true;
-    try { seen = !!localStorage.getItem(key); if (!seen) localStorage.setItem(key, '1'); } catch {}
-    if (!seen) petHatchUntil = v.now + 10e3;
+  if (!egg && firstTime(`pet-hatched-${v.week}`)) petHatchUntil = v.now + 10e3;
+
+  // 주가 바뀐 뒤 처음 볼 때 새 알 도착을 알린다(처음 설치한 주는 알릴 게 없다)
+  if (v.week) {
+    let prev = null;
+    try { prev = localStorage.getItem(`pet-week${WIN}`); localStorage.setItem(`pet-week${WIN}`, String(v.week)); } catch {}
+    if (prev && prev !== String(v.week)) { petArriveUntil = v.now + 15e3; petArriveLine = arriveLine(v); }
   }
+
+  // 마지막 날 — 들어설 때 한 번 말풍선, 그 뒤로는 쉬는 동안의 대사로
+  const lastDay = !!v.resetAt && v.resetAt > v.now && v.resetAt - v.now <= 864e5;
+  if (lastDay && firstTime(`pet-bye-${v.week}${WIN}`)) petByeUntil = v.now + 10e3;
+  const bye = lastDay ? byeLine(v, egg) : '';
 
   const { working, waiting } = petCounts;
   let mood, say;
-  if (egg) {
+  if (petArriveUntil > v.now) { mood = egg ? 'wobble' : 'hop'; say = petArriveLine; }
+  else if (petByeUntil > v.now) { mood = egg ? 'wobble' : 'hop'; say = bye; }
+  else if (egg) {
     mood = working ? 'wobble' : 'still';
-    say = '두근두근! 누가 태어날까?';
+    say = bye || '두근두근! 누가 태어날까?';
   } else if (petHatchUntil > v.now) { mood = 'hop'; say = '짠! 클마고치가 태어났어요'; }
   else if (petHappyUntil > v.now) { mood = 'hop'; say = petHappyLine; }
   else if (v.fh >= 100) { mood = 'sick'; say = pick(PET_SAY.sick); }
@@ -408,8 +455,8 @@ function renderPet() {
   }
   else if (working > 1) { mood = 'hop'; say = PET_SAY.crowd.replace('{n}', working); }
   else if (working) { mood = 'hop'; say = pick(PET_SAY.working); }
-  else if (v.food === 0) { mood = 'still'; say = pick(PET_SAY.hungry); }
-  else { mood = 'sleep'; say = pick(PET_SAY.sleep); }
+  else if (v.food === 0) { mood = 'still'; say = bye || pick(PET_SAY.hungry); }
+  else { mood = 'sleep'; say = bye || pick(PET_SAY.sleep); }
 
   const sprite = $('petSprite');
   const art = egg ? EGG : v.sp[STAGE_ART[v.stage]];
@@ -422,7 +469,8 @@ function renderPet() {
   for (const c of ['hop', 'shake', 'wobble', 'sick']) sprite.classList.toggle(c, mood === c);
   const fx = sprite.querySelector('.pet-fx');
   const FX = { sleep: ['zz', 'zZ'], shake: ['bang', '!'], tired: ['sweat', '💧'], sick: ['sweat', '💧'] };
-  const [fxc, fxt] = (petHatchUntil > v.now && !egg) ? ['spark', '✦'] : FX[mood] || ['', ''];
+  const sparkle = (petHatchUntil > v.now && !egg) || petArriveUntil > v.now;
+  const [fxc, fxt] = sparkle ? ['spark', '✦'] : FX[mood] || ['', ''];
   if (fx.className !== `pet-fx ${fxc}`) fx.className = `pet-fx ${fxc}`;
   setText(fx, fxt);
 
@@ -435,9 +483,10 @@ function renderPet() {
   setTitle($('petFood'), `오늘 ${meals}끼 — 응답이 끝날 때마다 한 칸씩 차고, ${DIGEST_MS / 60e3}분에 한 칸씩 소화해요`);
   setText($('petSay'), say);
   if (MINI) {
-    // 데스크톱 펫은 평소엔 말이 없다 — 부를 때·먹을 때·부화·쓰다듬을 때만 말풍선(마우스를 올려도 보임)
+    // 데스크톱 펫은 평소엔 말이 없다 — 부를 때·먹을 때·부화·쓰다듬을 때·새 알·작별 인사 때만 말풍선(마우스를 올려도 보임)
     const event = petHatchUntil > v.now || petHappyUntil > v.now || v.fedAgo < 60e3 || v.fh >= 100;
-    $('petSay').classList.toggle('show', !egg && (waiting > 0 || event));
+    const notice = petArriveUntil > v.now || petByeUntil > v.now; // 알일 때도 보인다
+    $('petSay').classList.toggle('show', notice || (!egg && (waiting > 0 || event)));
     $('petSay').classList.toggle('call', !egg && waiting > 0);
     setTitle($('petSay'), waiting ? '눌러서 그 세션으로 이동' : '');
     sendPetHit();
