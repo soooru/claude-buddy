@@ -344,7 +344,8 @@ function petView() {
   let pct = week ? wk.used_percentage : 0;
   let byTokens = false;
   // 사용량이 오지 않는 계정(API 키 로그인 등)은 이번 주 출력 토큰으로 자란다 — 100만 토큰 = 100%
-  if (!week && petData.tokenWeek === weekKey()) {
+  // 주간이 막 초기화돼 사용량이 아직 안 온 구독 계정은 토큰으로 넘어가지 않고 새 사용량을 기다린다
+  if (!week && !hasUsageAccount() && petData.tokenWeek === weekKey()) {
     week = `w${petData.tokenWeek}`;
     pct = Math.min(100, ((petData.weekTokens || 0) / 1e6) * 100);
     byTokens = true;
@@ -359,6 +360,11 @@ function petView() {
   const since = petData.foodAt || petData.lastFedAt || now;
   const food = Math.round(Math.max(0, Math.min(5, base - (now - since) / DIGEST_MS)));
   return { now, week, pct, lv, stage, sp, fh, fedAgo, food, byTokens };
+}
+
+// 주간 사용량을 받아 본 계정 — 지난 사용량이 남아 있거나 도감에 사용량 주(resets_at 키)가 있다
+function hasUsageAccount() {
+  return !!(lastUsage && lastUsage.seven_day) || Object.keys(petData.collection || {}).some((k) => !k.startsWith('w'));
 }
 
 // record.cjs 의 weekKey 와 같은 식 — 이번 주 월요일(로컬) 날짜
@@ -456,7 +462,12 @@ async function collect(v) {
 }
 
 function renderDex() {
-  const col = Object.values(petData.collection || {});
+  const entries = Object.entries(petData.collection || {});
+  // 예전 버전은 주간 초기화 직후 토큰 주로 잘못 넘어가 못 본 친구를 기록했다 —
+  // 사용량 주와 일주일 안쪽으로 겹치는 토큰 주(w...)는 그 흔적이라 빼고 센다
+  const usageAt = entries.filter(([k]) => !k.startsWith('w')).map(([k]) => Number(k) * 1000);
+  const col = entries.filter(([k, c]) => !k.startsWith('w') || !c
+    || !usageAt.some((t) => Math.abs(t - c.at) <= 7 * 864e5)).map(([, c]) => c);
   const best = new Map();
   for (const c of col) {
     // 파일에서 읽은 값이라 화면에 넣기 전에 숫자·알려진 이름으로 좁힌다
