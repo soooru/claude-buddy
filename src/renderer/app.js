@@ -240,11 +240,13 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeMen
 
 let currentView = null;
 function showView(id) {
+  if (currentView === 'viewGame' && id !== 'viewGame') game.stop();
   currentView = id;
   for (const v of app.querySelectorAll('.view')) v.hidden = v.id !== id;
   $('mainView').hidden = !!id;
   if (id === 'viewOff') { $('prefOff').checked = !!prefs.showOffWork; $('prefOffTime').value = prefs.offWork; }
   if (id === 'viewDex') renderDex();
+  if (id === 'viewGame') gameReady();
 }
 for (const b of menu.querySelectorAll('[data-view]')) b.onclick = () => { closeMenu(); showView(b.dataset.view); };
 for (const b of app.querySelectorAll('[data-back]')) b.onclick = () => showView(null);
@@ -599,6 +601,54 @@ $('petSprite').onclick = () => {
   setTimeout(() => h.remove(), 1000);
   renderPet();
 };
+
+// ── 밥 받기 ── 30초 미니게임(game.js). 지금 키우는 모습 그대로 받고, 끝나면 펫이 한마디 한다.
+// 보상은 기분뿐 — 레벨(주간 사용량)과 밥 칸(Claude 응답)은 건드리지 않는다
+let gameCallsAt = 0;
+const game = window.FoodGame.create($('gameCanvas'), {
+  pal: PET_PAL,
+  art: () => { const v = petView(); return v.lv === 0 || !v.sp ? EGG : v.sp[STAGE_ART[v.stage]]; },
+  // 게임을 시작한 뒤 새로 부르는 세션이 생기면 멈춘다
+  calling: () => petCounts.waiting > gameCallsAt,
+  onTick: (left, score) => setText($('gameHud'), `⏱ ${Math.ceil(left / 1000)}초 · 🍙 ${score}`),
+  onPause: (why) => gameMsg(why === 'call' ? '<b>🔔 Claude 가 불러요!</b><span class="muted">대답하고 와서 이어 해요</span>' : '<b>잠깐 멈췄어요</b>',
+    [['계속하기', () => { gameCallsAt = petCounts.waiting; gameMsg(); game.resume(); }]]),
+  onEnd: (score) => {
+    const best = gameBest();
+    if (score > best) { try { localStorage.setItem('game-best', String(score)); } catch {} }
+    gameMsg(`<b>${score > best ? '🎉 최고 기록!' : '끝!'} ${score}점</b><span class="muted">최고 ${Math.max(best, score)}점</span>`,
+      [['한 판 더', gameStart], ['펫 보러 가기', () => showView(null)]]);
+    petHappyUntil = Date.now() + 5000;
+    petHappyLine = score >= 25 ? '배 터지겠어요! 최고의 밥 받기 😋' : score >= 10 ? `냠냠 ${score}점! 또 놀아 줘요` : '헤헤, 다음엔 더 잘 받을게요!';
+  },
+});
+function gameBest() {
+  try { return Number(localStorage.getItem('game-best')) || 0; } catch { return 0; }
+}
+// 판 위 안내·결과 — 버튼은 [이름, 할 일]
+function gameMsg(html, buttons = []) {
+  const box = $('gameMsg');
+  box.hidden = !html;
+  box.innerHTML = html || '';
+  for (const [label, fn] of buttons) {
+    const b = document.createElement('button');
+    b.textContent = label;
+    b.onclick = fn;
+    box.appendChild(b);
+  }
+}
+function gameReady() {
+  game.stop();
+  const best = gameBest();
+  setText($('gameHud'), best ? `최고 ${best}점` : '');
+  gameMsg('<b>🍚 밥 받기 · 30초</b><span class="muted">떨어지는 밥을 받아요. 🐞 버그는 피하고!</span>', [['시작', gameStart]]);
+}
+function gameStart() {
+  gameCallsAt = petCounts.waiting;
+  gameMsg();
+  game.start();
+}
+$('gameBtn').onclick = (e) => { e.stopPropagation(); showView('viewGame'); };
 
 $('petName').ondblclick = () => {
   const v = petView();

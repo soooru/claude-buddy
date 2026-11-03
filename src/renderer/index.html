@@ -140,6 +140,16 @@
   .dex-name { font-size: 12px; font-weight: 700; }
   .dex-meta { font-size: 11px; color: var(--muted); }
   .dex-cell.unknown .dex-name { color: var(--muted); }
+  .game { position: relative; }
+  .game canvas { display: block; width: 100%; height: 260px; background: var(--row); border-radius: 6px; cursor: none; touch-action: none; }
+  .game-over { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 10px; text-align: center; background: rgba(23, 24, 28, .78); border-radius: 6px; }
+  .game-over[hidden] { display: none; }
+  .game-over b { font-size: 16px; color: var(--title); }
+  .game-over button { background: var(--bg); border: 1px solid var(--line); color: var(--text); font: inherit; border-radius: 6px;
+    padding: 6px 16px; cursor: pointer; }
+  .game-over button:hover { border-color: var(--title); }
+  .game-btn { width: 24px; height: 20px; font-size: 13px; line-height: 1; padding: 0; }
   .dex-note { font-size: 11px; padding: 10px 4px 0; }
   .prefs-row { display: flex; align-items: center; gap: 8px; cursor: pointer; }
   .prefs-row input[type=checkbox] { accent-color: var(--title); margin: 0; }
@@ -226,6 +236,7 @@
     <div class="menu" id="menu" hidden role="menu">
       <button role="menuitem" data-view="viewOff">🏠 퇴근 시간</button>
       <button role="menuitem" data-view="viewDex">📖 버디 도감</button>
+      <button role="menuitem" data-view="viewGame">🍚 밥 받기</button>
     </div>
   </header>
 
@@ -244,13 +255,22 @@
     <div class="muted dex-note">매주 알에서 한 친구가 태어나요. 한 번 만난 친구는 여기 남고, 가장 많이 키운 모습으로 보여요.</div>
   </section>
 
+  <section class="view" id="viewGame" hidden>
+    <div class="view-head"><button class="back" data-back>←</button><span>밥 받기</span><span class="muted" id="gameHud"></span></div>
+    <div class="game">
+      <canvas id="gameCanvas"></canvas>
+      <div class="game-over" id="gameMsg"></div>
+    </div>
+    <div class="muted dex-note">마우스나 ← → 키로 움직여요. 🍙 +1 · ⭐ +3 · 🐞 버그는 -2 에 잠깐 어지러워요. Claude 가 부르면 잠깐 멈춰요.</div>
+  </section>
+
   <div id="mainView">
   <div class="offwork" id="offwork" hidden></div>
   <div class="pet" id="pet">
     <div class="pet-sprite" id="petSprite" title="쓰다듬기"><div class="pet-body"></div><span class="pet-fx"></span></div>
     <div class="pet-info">
       <div class="pet-head"><span class="pet-name" id="petName"></span><span class="pet-lv" id="petLv"></span>
-        <span class="pet-food" id="petFood"></span></div>
+        <span class="pet-food" id="petFood"></span><button class="iconbtn game-btn" id="gameBtn" title="밥 받기 — 30초 미니게임">🎮</button></div>
       <div class="pet-say" id="petSay"></div>
       <div class="pet-exp" id="petExp"><i></i></div>
     </div>
@@ -263,6 +283,7 @@
   </div>
 </div>
 <script src="/pet-art.js"></script>
+<script src="/game.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>

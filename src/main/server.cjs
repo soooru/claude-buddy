@@ -27,6 +27,7 @@ const STATIC = {
   '/index.html': ['index.html', 'text/html'],
   '/app.js': ['app.js', 'text/javascript'],
   '/pet-art.js': ['pet-art.js', 'text/javascript'],
+  '/game.js': ['game.js', 'text/javascript'],
   '/setup.html': ['setup.html', 'text/html'],
   '/setup.js': ['setup.js', 'text/javascript'],
   '/favicon.svg': ['icon.svg', 'image/svg+xml'],
