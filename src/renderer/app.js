@@ -244,6 +244,7 @@ function showView(id) {
   currentView = id;
   for (const v of app.querySelectorAll('.view')) v.hidden = v.id !== id;
   $('mainView').hidden = !!id;
+  $('scroller').scrollTop = 0; // 화면을 바꾸면 본문 맨 위부터
   if (id === 'viewOff') { $('prefOff').checked = !!prefs.showOffWork; $('prefOffTime').value = prefs.offWork; }
   if (id === 'viewDex') renderDex();
   if (id === 'viewGame') gameReady();
@@ -292,14 +293,14 @@ function renderUsage() {
 }
 
 // ── 다마고치 ──
-// 레벨은 주간 사용량 %(16%에 부화, 그 뒤 10%마다 1레벨)이라 주간 리셋 때 알로 돌아간다.
+// 레벨은 주간 사용량 %(15%에 부화, 그 뒤 10%마다 1레벨)이라 주간 리셋 때 알로 돌아간다.
 // 그 주의 캐릭터는 주간 리셋 시각을 시드로 고른다 — 껐다 켜도 그 주 안에서는 같은 친구다.
 // 밥은 hook.cjs 가 응답이 끝날 때마다 pet.json 에 기록한다.
 // 도트는 pet-art.js — 미리보기 시트(app/pet-sheet.cjs)와 같이 쓴다. [이름, 아기, 어린이, 어른]
 const { PAL: PET_PAL, EGG, SPECIES } = window.PET_ART;
-// Lv.0 알(~15%) · 1~2 아기(16~29%) · 3~5 어린이 · 6~10 어른(주간 사용량 60%) — 한도 근처까지 쓰지 않아도 어른이 되게.
-// 부화는 16%부터라 Lv.1 만 16~19% 로 짧다. 단계마다 도트가 따로 있어 크기는 같은 배율로 그린다
-const HATCH_PCT = 16;
+// Lv.0 알(~14%) · 1~2 아기(15~29%) · 3~5 어린이 · 6~10 어른(주간 사용량 60%) — 한도 근처까지 쓰지 않아도 어른이 되게.
+// 부화는 15%부터라 Lv.1 만 15~19% 로 짧다. 단계마다 도트가 따로 있어 크기는 같은 배율로 그린다
+const HATCH_PCT = 15;
 const levelOf = (pct) => (pct < HATCH_PCT ? 0 : Math.min(10, Math.max(1, Math.floor(pct / 10))));
 // 지금 레벨이 시작·끝나는 사용량 % — 경험치 막대와 「다음 레벨까지」에 쓴다
 const levelSpan = (lv) => [lv === 0 ? 0 : lv === 1 ? HATCH_PCT : lv * 10, lv === 0 ? HATCH_PCT : (lv + 1) * 10];
@@ -403,7 +404,7 @@ function arriveLine(v) {
     .map(([, c]) => c).sort((a, b) => (b.at || 0) - (a.at || 0))[0];
   if (!last) return '새 알이 도착했어요! 이번 주엔 누가 태어날까?';
   const lv = Math.max(0, Math.min(10, Math.floor(Number(last.lv)) || 0));
-  return `새 알이 도착했어요! 지난주 ${last.species}${topic(last.species)} 도감에 있어요 (최고 Lv.${lv} ${stageOf(lv)})`;
+  return `새 알이 도착했어요! 지난주 ${last.species}${topic(last.species)} 도감에 있어요 (${stageOf(lv)}까지 자랐어요)`;
 }
 
 // 리셋 24시간 전부터의 작별 대사 — 남은 시간과, 어른이 아직이면 남은 사용량을 같이
@@ -480,9 +481,15 @@ function renderPet() {
   setText(fx, fxt);
 
   const named = petData.name && petData.nameWeek === v.week;
-  setText($('petName'), egg ? '알' : named ? petData.name : v.sp[0]);
+  // 「여우(아기)」처럼 이름 뒤에 단계를 붙인다 — 이름을 고칠 때는 petData.name 만 쓰므로 괄호는 섞이지 않는다
+  setText($('petName'), egg ? '알' : `${named ? petData.name : v.sp[0]}(${v.stage})`);
   setTitle($('petName'), egg ? '' : '더블클릭해서 이름 짓기');
-  setText($('petLv'), `Lv.${v.lv} ${egg ? '' : v.stage}`.trim());
+  // 다음 단계까지 남은 % 를 늘 보이게 — 알 → 부화, 아기 → 어린이, 어린이 → 어른. 어른은 더 갈 곳이 없다
+  const NEXT = { 알: ['부화', HATCH_PCT], 아기: ['어린이', 30], 어린이: ['어른', 60] };
+  const [nextName, nextAt] = NEXT[egg ? '알' : v.stage] || [];
+  const toNext = nextName ? `${nextName}까지 ${Math.max(1, Math.ceil(nextAt - v.pct))}%` : '';
+  // 레벨 숫자는 빼고 다음 단계까지 남은 % 만 — 단계는 이름 뒤 괄호에 있다
+  setText($('petLv'), toNext && `· ${toNext}`);
   const meals = petData.mealsDate === new Date().toLocaleDateString('sv') ? petData.mealsToday || 0 : 0;
   setHtml($('petFood'), `밥 <b>${'▰'.repeat(v.food)}</b>${'▱'.repeat(5 - v.food)}`);
   setTitle($('petFood'), `오늘 ${meals}끼 — 응답이 끝날 때마다 한 칸씩 차고, ${DIGEST_MS / 60e3}분에 한 칸씩 소화해요`);
@@ -500,8 +507,6 @@ function renderPet() {
   const exp = v.lv >= 10 ? 100 : Math.max(0, Math.min(100, ((v.pct - from) / (to - from)) * 100));
   const bar = $('petExp').firstElementChild;
   if (bar.style.width !== `${exp}%`) bar.style.width = `${exp}%`;
-  setTitle($('petExp'), v.lv >= 10 ? '최고 레벨!'
-    : `${v.byTokens ? '이번 주 출력 토큰' : '주간 사용량'}으로 자라요 · ${v.lv === 0 ? '부화' : '다음 레벨'}까지 ${Math.ceil(to - v.pct)}%`);
 }
 
 // ── 버디 도감 ── 그 주의 친구와 최고 레벨을 기록한다(레벨이 오를 때만 저장 요청)
@@ -551,9 +556,9 @@ function renderDex() {
         <div class="dex-name">???</div><div class="dex-meta">아직 못 만났어요</div></div>`;
     }
     const stage = stageOf(b.lv);
-    return `<div class="dex-cell" title="${esc(sp[0])} — 최고 Lv.${b.lv} ${stage}">
+    return `<div class="dex-cell" title="${esc(sp[0])} — ${stage}까지 자랐어요">
       <div class="dex-art">${petSvg(sp[STAGE_ART[stage]], 3, false)}</div>
-      <div class="dex-name">${esc(sp[0])}</div><div class="dex-meta">Lv.${b.lv} ${stage} · ${b.weeks}번</div></div>`;
+      <div class="dex-name">${esc(sp[0])}</div><div class="dex-meta">${stage} · ${b.weeks}번</div></div>`;
   }).join('');
 }
 

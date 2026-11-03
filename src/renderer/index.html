@@ -22,8 +22,11 @@
   .detail .full::-webkit-scrollbar-thumb { border-color: var(--bg); }
   html, body { margin: 0; background: var(--bg); color: var(--text);
     font: 13px/1.45 "Pretendard", "Malgun Gothic", system-ui, sans-serif; }
-  #app { padding: 14px 12px 12px; }
-  header { display: flex; align-items: baseline; gap: 10px; padding: 0 4px 12px; margin-bottom: 12px;
+  /* 헤더는 위에 고정하고 아래 본문(.scroller)만 스크롤한다 */
+  html, body { height: 100%; overflow: hidden; }
+  #app { height: 100%; display: flex; flex-direction: column; padding-top: 14px; }
+  .scroller { flex: 1; min-height: 0; overflow-y: auto; padding: 0 12px 12px; }
+  header { flex: none; display: flex; align-items: baseline; gap: 10px; padding: 0 4px 12px; margin: 0 12px 12px;
     border-bottom: 1px solid var(--line); }
   h1 { margin: 0; font-size: 16px; font-weight: 700; color: var(--title); white-space: nowrap; }
   .sub { color: var(--muted); min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -103,6 +106,7 @@
   /* ── 미니 모드(데스크톱 펫): 투명 창에 펫과 말풍선만 ── */
   html:has(body.mini), body.mini { background: transparent !important; overflow: hidden; }
   body.mini #app { padding: 0; height: 100vh; }
+  body.mini .scroller { padding: 0; overflow: hidden; }
   body.mini header, body.mini .view, body.mini #offwork, body.mini #usageTitle, body.mini #usage,
   body.mini #count, body.mini #list, body.mini #err, body.mini .pet-head, body.mini .pet-exp { display: none !important; }
   body.mini .pet { background: none; padding: 0 0 6px; margin: 0; height: 100vh; flex-direction: column-reverse;
@@ -208,7 +212,7 @@
   .pet-info { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3px; }
   .pet-head { display: flex; align-items: baseline; gap: 8px; white-space: nowrap; min-width: 0; }
   .pet-name { font-weight: 700; color: var(--title); overflow: hidden; text-overflow: ellipsis; cursor: text; }
-  .pet-lv { color: var(--muted); font-size: 12px; }
+  .pet-lv { color: var(--muted); font-size: 12px; margin-left: -4px; }
   .pet-food { margin-left: auto; color: var(--muted); font-size: 12px; }
   .pet-food b { color: var(--waiting); font-weight: 400; }
   .pet-say { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -261,6 +265,7 @@
       <button role="menuitem" data-view="viewGames">🎮 미니게임</button>
     </div>
   </header>
+  <div class="scroller" id="scroller">
 
   <!-- 설정 화면(탭) — 메뉴에서 고르면 본 화면 대신 보인다 -->
   <section class="view" id="viewOff" hidden>
@@ -285,7 +290,7 @@
       <button class="game-pick" data-game="viewMatch"><span class="gp-icon">📖</span>
         <span><b>도감 짝 맞추기</b><span class="muted">카드를 뒤집어 같은 친구를 찾아요</span></span><span class="muted gp-best" id="bestMatch"></span></button>
     </div>
-    <div class="muted dex-note">점수는 펫의 기분에만 영향을 줘요. 레벨과 밥 칸은 그대로예요.</div>
+    <div class="muted dex-note">점수는 펫의 기분에만 영향을 줘요. 성장과 밥 칸은 그대로예요.</div>
   </section>
   <section class="view" id="viewMatch" hidden>
     <div class="view-head"><button class="back" data-back="viewGames">←</button><span>도감 짝 맞추기</span><span class="muted" id="matchHud"></span></div>
@@ -320,6 +325,7 @@
   <div class="count" id="count"></div>
   <div class="list" id="list"></div>
   <div class="err" id="err"></div>
+  </div>
   </div>
 </div>
 <script src="/pet-art.js"></script>
