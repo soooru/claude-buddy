@@ -287,13 +287,17 @@ function renderUsage() {
 }
 
 // ── 다마고치 ──
-// 레벨은 주간 사용량 %(10%마다 1레벨)이라 주간 리셋 때 알로 돌아간다.
+// 레벨은 주간 사용량 %(16%에 부화, 그 뒤 10%마다 1레벨)이라 주간 리셋 때 알로 돌아간다.
 // 그 주의 캐릭터는 주간 리셋 시각을 시드로 고른다 — 껐다 켜도 그 주 안에서는 같은 친구다.
 // 밥은 hook.cjs 가 응답이 끝날 때마다 pet.json 에 기록한다.
 // 도트는 pet-art.js — 미리보기 시트(app/pet-sheet.cjs)와 같이 쓴다. [이름, 아기, 어린이, 어른]
 const { PAL: PET_PAL, EGG, SPECIES } = window.PET_ART;
-// Lv.0 알 · 1~2 아기 · 3~5 어린이 · 6~10 어른(주간 사용량 60%) — 한도 근처까지 쓰지 않아도 어른이 되게.
-// 단계마다 도트가 따로 있어 크기는 같은 배율로 그린다
+// Lv.0 알(~15%) · 1~2 아기(16~29%) · 3~5 어린이 · 6~10 어른(주간 사용량 60%) — 한도 근처까지 쓰지 않아도 어른이 되게.
+// 부화는 16%부터라 Lv.1 만 16~19% 로 짧다. 단계마다 도트가 따로 있어 크기는 같은 배율로 그린다
+const HATCH_PCT = 16;
+const levelOf = (pct) => (pct < HATCH_PCT ? 0 : Math.min(10, Math.max(1, Math.floor(pct / 10))));
+// 지금 레벨이 시작·끝나는 사용량 % — 경험치 막대와 「다음 레벨까지」에 쓴다
+const levelSpan = (lv) => [lv === 0 ? 0 : lv === 1 ? HATCH_PCT : lv * 10, lv === 0 ? HATCH_PCT : (lv + 1) * 10];
 const stageOf = (lv) => (lv === 0 ? '알' : lv < 3 ? '아기' : lv < 6 ? '어린이' : '어른');
 const STAGE_ART = { 아기: 1, 어린이: 2, 어른: 3 };
 const PET_PX = MINI ? 5 : 4;
@@ -350,7 +354,7 @@ function petView() {
     pct = Math.min(100, ((petData.weekTokens || 0) / 1e6) * 100);
     byTokens = true;
   }
-  const lv = Math.min(10, Math.floor(pct / 10));
+  const lv = levelOf(pct);
   const stage = stageOf(lv);
   const sp = week ? SPECIES[hash(String(week)) % SPECIES.length] : null;
   const fh = lastUsage && live(lastUsage.five_hour) ? lastUsage.five_hour.used_percentage : 0;
@@ -438,11 +442,12 @@ function renderPet() {
     setTitle($('petSay'), waiting ? '눌러서 그 세션으로 이동' : '');
     sendPetHit();
   }
-  const exp = v.lv >= 10 ? 100 : (v.pct % 10) * 10;
+  const [from, to] = levelSpan(v.lv);
+  const exp = v.lv >= 10 ? 100 : Math.max(0, Math.min(100, ((v.pct - from) / (to - from)) * 100));
   const bar = $('petExp').firstElementChild;
   if (bar.style.width !== `${exp}%`) bar.style.width = `${exp}%`;
   setTitle($('petExp'), v.lv >= 10 ? '최고 레벨!'
-    : `${v.byTokens ? '이번 주 출력 토큰' : '주간 사용량'}으로 자라요 · 다음 레벨까지 ${Math.ceil(10 - (v.pct % 10))}%`);
+    : `${v.byTokens ? '이번 주 출력 토큰' : '주간 사용량'}으로 자라요 · ${v.lv === 0 ? '부화' : '다음 레벨'}까지 ${Math.ceil(to - v.pct)}%`);
 }
 
 // ── 버디 도감 ── 그 주의 친구와 최고 레벨을 기록한다(레벨이 오를 때만 저장 요청)
