@@ -202,20 +202,32 @@ function kstNow() {
   const parts = Object.fromEntries(KST.formatToParts(new Date()).map((x) => [x.type, x.value]));
   return { weekday: parts.weekday, minutes: (Number(parts.hour) % 24) * 60 + Number(parts.minute) };
 }
+const span = (min) => `${Math.floor(min / 60) ? `${Math.floor(min / 60)}시간 ` : ''}${min % 60}분`;
+function offWorkState() {
+  const [oh, om] = prefs.offWork.split(':').map(Number);
+  const now = kstNow();
+  const left = oh * 60 + om - now.minutes;
+  const weekend = now.weekday === 'Sat' || now.weekday === 'Sun';
+  // 퇴근 시각이 지났는데 Claude 세션이 아직 일하거나 부르고 있으면 야근 중
+  const overtime = !weekend && left <= 0 && petCounts.working + petCounts.waiting > 0;
+  return { left, weekend, overtime };
+}
+// 야근한 지 몇 분째인지 — 퇴근 시간 표시를 켠 사람만(꺼 두면 퇴근 시각을 모르는 셈)
+function overtimeMin() {
+  if (!prefs.showOffWork) return 0;
+  const { left, overtime } = offWorkState();
+  return overtime ? Math.max(1, -left) : 0;
+}
 function renderOffWork() {
   const box = $('offwork');
   setHidden(box, !prefs.showOffWork);
   if (box.hidden) return;
-  const [oh, om] = prefs.offWork.split(':').map(Number);
-  const now = kstNow();
-  const left = oh * 60 + om - now.minutes;
-  box.classList.toggle('done', left <= 0 || now.weekday === 'Sat' || now.weekday === 'Sun');
-  if (now.weekday === 'Sat' || now.weekday === 'Sun') setHtml(box, '🏖 <b>오늘은 쉬는 날이에요</b>');
+  const { left, weekend, overtime } = offWorkState();
+  box.classList.toggle('done', !overtime && (left <= 0 || weekend));
+  if (weekend) setHtml(box, '🏖 <b>오늘은 쉬는 날이에요</b>');
+  else if (overtime) setHtml(box, `🌙 야근 중 · <b>${span(Math.max(1, -left))}째</b>`);
   else if (left <= 0) setHtml(box, '🎉 <b>퇴근 시간이에요! 수고하셨어요</b>');
-  else {
-    const h = Math.floor(left / 60), m = left % 60;
-    setHtml(box, `🏠 퇴근까지 <b>${h ? `${h}시간 ` : ''}${m}분</b>`);
-  }
+  else setHtml(box, `🏠 퇴근까지 <b>${span(left)}</b>`);
   setTitle(box, `퇴근 시간 ${prefs.offWork} (KST) — ⚙ 에서 바꿀 수 있어요`);
 }
 
@@ -334,6 +346,15 @@ const PET_SAY = {
   tired: ['헥헥… 너무 많이 먹었나 봐요', '배불러서 움직이기 힘들어요'],
   sick: ['배탈 났어요… 조금 쉬어요 🤒'],
   pet: ['헤헤 ♥', '간지러워요~', '더 해 주세요!'],
+  // 야근 중 — 퇴근 시각이 지났는데 아직 일할 때. {t} 는 야근한 시간
+  overtime: [
+    '오늘도 늦게까지 고생 많아요… 🌙',
+    '야근 중이라니… 제가 옆에 있을게요',
+    '조금만 더 힘내요! 끝나면 푹 쉬어요',
+    '무리하지 마요. 따뜻한 물 한 잔 어때요? 🍵',
+    '벌써 {t}째예요. 정말 수고 많았어요',
+  ],
+  overtimeLong: ['{t}째예요… 이제 그만 쉬어도 돼요 🥺', '남은 건 내일 해요. 오늘은 충분해요'],
 };
 // 같은 상태가 이어지면 12초마다 다음 대사로 넘어간다
 const pick = (list) => list[Math.floor(Date.now() / 12e3) % list.length];
@@ -444,12 +465,15 @@ function renderPet() {
   const bye = lastDay ? byeLine(v, egg) : '';
 
   const { working, waiting } = petCounts;
+  // 야근 중엔 일하는 동안의 대사 대신 위로의 말 — 2시간이 넘으면 그만 쉬라고
+  const otMin = overtimeMin();
+  const comfort = otMin && pick(otMin >= 120 ? PET_SAY.overtimeLong : PET_SAY.overtime).replace('{t}', span(otMin));
   let mood, say;
   if (petArriveUntil > v.now) { mood = egg ? 'wobble' : 'hop'; say = petArriveLine; }
   else if (petByeUntil > v.now) { mood = egg ? 'wobble' : 'hop'; say = bye; }
   else if (egg) {
     mood = working ? 'wobble' : 'still';
-    say = bye || '두근두근! 누가 태어날까?';
+    say = bye || comfort || '두근두근! 누가 태어날까?';
   } else if (petHatchUntil > v.now) { mood = 'hop'; say = '짠! 클마고치가 태어났어요'; }
   else if (petHappyUntil > v.now) { mood = 'hop'; say = petHappyLine; }
   else if (v.fh >= 100) { mood = 'sick'; say = pick(PET_SAY.sick); }
@@ -459,6 +483,7 @@ function renderPet() {
     mood = 'hop';
     say = petData.overfullAt && v.now - petData.overfullAt < 60e3 ? '배불러요~ 더는 못 먹어요' : pick(PET_SAY.eat);
   }
+  else if (comfort) { mood = 'hop'; say = comfort; }
   else if (working > 1) { mood = 'hop'; say = PET_SAY.crowd.replace('{n}', working); }
   else if (working) { mood = 'hop'; say = pick(PET_SAY.working); }
   else if (v.food === 0) { mood = 'still'; say = bye || pick(PET_SAY.hungry); }
