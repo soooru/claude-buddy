@@ -655,7 +655,7 @@ function gameReady() {
   game.stop();
   const best = gameBest();
   setText($('gameHud'), best ? `최고 ${best}점` : '');
-  gameMsg('<b>🍚 밥 받기 · 30초</b><span class="muted">떨어지는 밥을 받아요. 🐞 버그는 피하고!</span>', [['시작', gameStart]]);
+  gameMsg('<b>🍚 밥 받기 · 30초</b><span class="muted">← → 키로 움직여 밥을 받아요. 🐞 버그는 피하고!</span>', [['시작', gameStart]]);
 }
 function gameStart() {
   gameCallsAt = petCounts.waiting;

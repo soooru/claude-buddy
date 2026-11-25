@@ -28,7 +28,7 @@
     let W = 0, H = 0;
     let state = 'idle'; // idle · run · pause · over
     let raf = 0, last = 0, left = ROUND_MS, score = 0, items = [], spawnIn = 0, stunUntil = 0, pops = [];
-    let px = 0, target = null, keys = { l: false, r: false }, flip = false;
+    let px = 0, keys = { l: false, r: false }, flip = false;
 
     function fit() {
       const dpr = window.devicePixelRatio || 1;
@@ -55,14 +55,12 @@
       const art = hooks.art();
       const [pw, ph] = size(art);
       const py = H - ph - 6;
-      // 움직이기 — 마우스 목표를 따라가거나 화살표/A·D. 어지러운 동안은 못 움직인다
+      // 움직이기 — 키보드(← → 또는 A·D)만. 어지러운 동안은 못 움직인다
       const speed = 300 * (dt / 1000);
       if (now > stunUntil) {
-        let dir = (keys.r ? 1 : 0) - (keys.l ? 1 : 0);
-        if (dir) target = null;
-        else if (target != null) dir = Math.abs(target - px) < speed ? 0 : Math.sign(target - px);
+        const dir = (keys.r ? 1 : 0) - (keys.l ? 1 : 0);
         if (dir) flip = dir < 0;
-        px = target != null && Math.abs(target - px) < speed ? target : px + dir * speed;
+        px += dir * speed;
       }
       px = Math.max(pw / 2, Math.min(W - pw / 2, px));
 
@@ -115,7 +113,7 @@
 
     function start() {
       fit();
-      left = ROUND_MS; score = 0; items = []; pops = []; spawnIn = 300; stunUntil = 0; px = W / 2; target = null;
+      left = ROUND_MS; score = 0; items = []; pops = []; spawnIn = 300; stunUntil = 0; px = W / 2; keys = { l: false, r: false };
       resume();
     }
     function resume() {
@@ -131,8 +129,6 @@
     }
     function stop() { cancelAnimationFrame(raf); state = 'idle'; }
 
-    canvas.addEventListener('pointermove', (e) => { target = e.offsetX; });
-    canvas.addEventListener('pointerleave', () => { target = null; });
     const key = (down) => (e) => {
       if (state !== 'run') return;
       const k = e.key.toLowerCase();
