@@ -1,7 +1,7 @@
 {
   "name": "claude-buddy",
   "productName": "Claude Buddy",
-  "version": "0.7.8",
+  "version": "0.7.9",
   "description": "Unofficial desktop buddy for Claude Code — session dashboard, usage meter and a tiny pixel pet.",
   "author": "soooru",
   "license": "MIT",
